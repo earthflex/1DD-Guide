@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "1DD Capture",
+  "version": "1.0.0",
+  "description": "จับภาพแท็บที่คุณเปิดอยู่ แล้วส่งเข้า 1DD Guide ของคุณ",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "action": { "default_popup": "popup.html", "default_title": "จับภาพส่งเข้า 1DD" }
+}
