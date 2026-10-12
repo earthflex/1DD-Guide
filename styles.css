@@ -82,8 +82,8 @@ dialog{border:1px solid #e1e1e1;border-radius:16px;padding:0;width:min(530px,cal
 .image-tab-wrap.active{background:#fff3eb;border-color:#ffc299;color:#333}.image-tab-wrap .image-tab{padding:0;border:0;background:transparent}.image-tab-wrap>.icon{width:11px;height:11px;color:#999;pointer-events:none}
 .image-label-input{font-size:12px;min-width:40px;max-width:160px;border:0;border-bottom:1px solid transparent;background:transparent;color:inherit;padding:3px 0}.image-label-input:hover{border-bottom-color:#aaa}.image-label-input:focus{outline:none;border-bottom-color:#ff6600}
 
-/* Sidebar palette matched to the supplied 1DD Hub reference. */
-.sidebar{background:#fff;color:#52525b;border-right-color:#e5e7eb}
+/* Editor sidebar: light gray surface with 1DD orange navigation. */
+.sidebar{background:#f3f4f6;color:#52525b;border-right-color:#e5e7eb}
 .sidebar .brand-name,.sidebar .project-name-input{color:#21242a}
 .sidebar .side-link,.sidebar .lesson-link,.sidebar .add-lesson{color:#52525b}
 .sidebar .side-label,.sidebar .lesson-number,.sidebar .project-context p{color:#71717a}
