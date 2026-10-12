@@ -5,17 +5,20 @@
   let config=window.GUIDE_CONFIG||{}, session=null, refreshPromise=null;
   const images=new Map();
   try{const stored=JSON.parse(localStorage.getItem(KEY)||'null');if(!config.supabaseUrl&&stored)config=stored;}catch{}
-  try{session=JSON.parse(sessionStorage.getItem(SESSION)||'null');if(session?.origin!==config.supabaseUrl)session=null;}catch{}
+  // Session lives in localStorage so new tabs stay signed in; tabs pick up each other's refreshes and logout.
+  const readStored=()=>{try{const s=JSON.parse(localStorage.getItem(SESSION)||'null');return s?.origin===config.supabaseUrl?s:null;}catch{return null;}};
+  session=readStored();
+  addEventListener('storage',ev=>{if(ev.key===SESSION)session=readStored();});
   function configure(url,key){
     const u=new URL(url.trim());if(u.protocol!=='https:'||u.username||u.password||u.pathname!=='/')throw new Error('ใช้ Supabase Project URL แบบ https://ชื่อโปรเจกต์.supabase.co');
     key=key.trim();if(key.startsWith('sb_secret_'))throw new Error('ห้ามใช้ secret key ใช้ publishable key เท่านั้น');
     if(!key.startsWith('sb_publishable_')){let claims;try{claims=JSON.parse(atob(key.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));}catch{throw new Error('API key ไม่ถูกต้อง');}if(claims.role!=='anon')throw new Error('ใช้ anon หรือ publishable key เท่านั้น ห้ามใช้ service_role');}
     const old=config.supabaseUrl;config={supabaseUrl:u.origin,supabaseKey:key};localStorage.setItem(KEY,JSON.stringify(config));if(old!==u.origin)storeSession(null);return config;
   }
-  function storeSession(s){session=s?{...s,expires_at:s.expires_at||Math.floor(Date.now()/1000)+(s.expires_in||3600),origin:config.supabaseUrl}:null;try{if(session)sessionStorage.setItem(SESSION,JSON.stringify(session));else sessionStorage.removeItem(SESSION);}catch{}return session;}
+  function storeSession(s){session=s?{...s,expires_at:s.expires_at||Math.floor(Date.now()/1000)+(s.expires_in||3600),origin:config.supabaseUrl}:null;try{if(session)localStorage.setItem(SESSION,JSON.stringify(session));else localStorage.removeItem(SESSION);}catch{}return session;}
   async function request(path,{method='GET',body,auth=true,headers={},blob=false}={}){
     if(!config.supabaseUrl||!config.supabaseKey)throw new Error('กรุณาตั้งค่า Supabase ก่อน');
-    if(auth){if(!session)throw new Error('กรุณาเข้าสู่ระบบคลาวด์');if(session.expires_at*1000<Date.now()+60000)await refresh();}
+    if(auth){const stored=readStored();if(stored&&stored.expires_at>(session?.expires_at||0))session=stored;if(!session)throw new Error('กรุณาเข้าสู่ระบบคลาวด์');if(session.expires_at*1000<Date.now()+60000)await refresh();}
     const h={apikey:config.supabaseKey,...headers};const token=auth?session.access_token:(config.supabaseKey.startsWith('eyJ')?config.supabaseKey:'');if(token)h.Authorization='Bearer '+token;
     if(body!==undefined&&!(body instanceof Blob)){h['Content-Type']='application/json';body=JSON.stringify(body);}
     let response;try{response=await fetch(config.supabaseUrl+path,{method,headers:h,body,signal:AbortSignal.timeout(45000),referrerPolicy:'no-referrer'});}catch{throw new Error('ติดต่อคลาวด์ไม่ได้ ตรวจอินเทอร์เน็ตและ Project URL แล้วลองใหม่');}
