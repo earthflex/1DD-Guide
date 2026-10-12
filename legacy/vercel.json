@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "node scripts/build-config.js && node scripts/build-extension-zip.js",
+  "installCommand": "",
+  "outputDirectory": ".",
+  "headers": [
+    { "source": "/(.*)", "headers": [
+      { "key": "X-Content-Type-Options", "value": "nosniff" },
+      { "key": "Referrer-Policy", "value": "no-referrer" }
+    ]},
+    { "source": "/config.js", "headers": [
+      { "key": "Cache-Control", "value": "no-store" }
+    ]}
+  ]
+}

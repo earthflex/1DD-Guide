@@ -1,10 +1,10 @@
-// Vercel build step: pack 1dd-capture-extension/ into 1dd-capture-extension.zip for download. No dependencies.
-const fs = require('fs');
-const path = require('path');
-const zlib = require('zlib');
+// prebuild step: pack 1dd-capture-extension/ into public/1dd-capture-extension.zip for download. No dependencies.
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
 
 const SRC = '1dd-capture-extension';
-const OUT = SRC + '.zip';
+const OUT = 'public/' + SRC + '.zip';
 
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   let c = n;
