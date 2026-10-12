@@ -45,7 +45,19 @@
     return {...w,projects};
   }
   async function imagePath(data,wid){if(images.has(data))return images.get(data);const [head,base64]=data.split(',');const mime=head.slice(5).split(';')[0],bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(b=>b.toString(16).padStart(2,'0')).join('');const path=wid+'/'+hash+'.'+({'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[mime]);await request('/storage/v1/object/guide-images/'+path,{method:'POST',body:new Blob([bytes],{type:mime}),headers:{'Content-Type':mime,'x-upsert':'true','cache-control':'3600'}});images.set(data,path);return path;}
-  async function save(wid,revision,projects){const data=GuideCore.copy(projects);for(const p of data){if(p.logo){if(!GuideCore.logoURL(p.logo))throw new Error('โลโก้ไม่ถูกต้อง');p._logoPath=await imagePath(p.logo,wid);p.logo='';}}for(const p of data)for(const page of p.pages)for(const q of GuideCore.frames(page)){if(q.image){q._imagePath=await imagePath(q.image,wid);q.image='';}}return rpc('guide_save_workspace',{wid,expected_revision:revision,doc:{projects:data}});}
+  async function save(wid,revision,projects){const data=GuideCore.copy(projects);for(const p of data){if(p.logo){if(!GuideCore.logoURL(p.logo))throw new Error('โลโก้ไม่ถูกต้อง');p._logoPath=await imagePath(p.logo,wid);p.logo='';}}for(const p of data)for(const page of p.pages)for(const q of GuideCore.frames(page)){if(q.image){q._imagePath=await imagePath(q.image,wid);q.image='';}}const result=await rpc('guide_save_workspace',{wid,expected_revision:revision,doc:{projects:data}});
+    const used=new Set();for(const p of data){if(p._logoPath)used.add(p._logoPath);for(const page of p.pages)for(const q of GuideCore.frames(page))if(q._imagePath)used.add(q._imagePath);}
+    pruneImages(wid,used).catch(()=>{});return result;}
+  // Delete bucket files no project in the saved workspace points to. Shared hashed paths make per-image deletes unsafe,
+  // so compare against the whole saved document; skip fresh files that a teammate may be about to save.
+  const PRUNE_EVERY=120000,PRUNE_GRACE=600000,lastPrune=new Map();
+  async function pruneImages(wid,used){
+    if(Date.now()-(lastPrune.get(wid)||0)<PRUNE_EVERY)return;lastPrune.set(wid,Date.now());
+    const stale=[];for(let offset=0;;offset+=1000){const list=await request('/storage/v1/object/list/guide-images',{method:'POST',body:{prefix:wid,limit:1000,offset,sortBy:{column:'name',order:'asc'}}});
+      for(const o of list||[]){const path=wid+'/'+o.name;if(o.id&&!used.has(path)&&Date.now()-Date.parse(o.created_at)>PRUNE_GRACE)stale.push(path);}if(!list||list.length<1000)break;}
+    if(!stale.length)return;await request('/storage/v1/object/guide-images',{method:'DELETE',body:{prefixes:stale}});
+    const gone=new Set(stale);for(const [data,path] of images)if(gone.has(path))images.delete(data);
+  }
   async function consumeAuthHash(){const params=new URLSearchParams(location.hash.slice(1));if(!params.has('access_token'))return '';const access_token=params.get('access_token'),refresh_token=params.get('refresh_token');const type=params.get('type');history.replaceState(null,'',location.pathname+location.search);storeSession({access_token,refresh_token,expires_in:Number(params.get('expires_in'))||3600});const user=await request('/auth/v1/user');storeSession({...session,user});return type;}
   async function recover(email){return request('/auth/v1/recover?redirect_to='+encodeURIComponent(location.href.split('#')[0].split('?')[0]),{method:'POST',auth:false,body:{email}});}
   async function changePassword(password){return request('/auth/v1/user',{method:'PUT',body:{password}});}

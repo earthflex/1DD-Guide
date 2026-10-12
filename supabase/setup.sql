@@ -170,6 +170,10 @@ create policy guide_image_update on storage.objects for update to authenticated 
 ) with check(
   bucket_id='guide-images' and exists(select 1 from public.guide_members m where m.workspace_id::text=(storage.foldername(name))[1] and m.user_id=(select auth.uid()))
 );
+drop policy if exists guide_image_delete on storage.objects;
+create policy guide_image_delete on storage.objects for delete to authenticated using(
+  bucket_id='guide-images' and exists(select 1 from public.guide_members m where m.workspace_id::text=(storage.foldername(name))[1] and m.user_id=(select auth.uid()))
+);
 
 -- Deny direct mutations: membership checks and revision checks cannot be bypassed.
 revoke all on public.guide_workspaces,public.guide_members,public.guide_invites,public.guide_publications from anon,authenticated;
