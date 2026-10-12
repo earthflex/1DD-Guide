@@ -24,7 +24,7 @@
   }
   async function refresh(){if(refreshPromise)return refreshPromise;if(!session?.refresh_token)throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');refreshPromise=request('/auth/v1/token?grant_type=refresh_token',{method:'POST',auth:false,body:{refresh_token:session.refresh_token}}).then(storeSession).finally(()=>refreshPromise=null);return refreshPromise;}
   async function login(email,password){return storeSession(await request('/auth/v1/token?grant_type=password',{method:'POST',auth:false,body:{email,password}}));}
-  async function signup(email,password){const result=await request('/auth/v1/signup',{method:'POST',auth:false,body:{email,password}});if(result.access_token)storeSession(result);return result;}
+  async function signup(email,password){const result=await request('/auth/v1/signup?redirect_to='+encodeURIComponent(location.href.split('#')[0].split('?')[0]),{method:'POST',auth:false,body:{email,password}});if(result.access_token)storeSession(result);return result;}
   async function logout(){try{if(session)await request('/auth/v1/logout?scope=local',{method:'POST'});}finally{storeSession(null);images.clear();}}
   const rpc=(name,body={},auth=true)=>request('/rest/v1/rpc/'+name,{method:'POST',body,auth});
   async function workspaces(){await rpc('guide_accept_invites');return request('/rest/v1/guide_workspaces?select=id,name,revision&order=created_at.asc');}
