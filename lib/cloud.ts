@@ -109,6 +109,12 @@ async function pruneImages(wid: string, used: Set<string>) {
   for (const [data, path] of uploaded) if (gone.has(path)) uploaded.delete(data);
 }
 
+/** Forget deleted files so a later save uploads them again if the same image comes back. */
+export function forgetUploaded(paths: string[]) {
+  const gone = new Set(paths);
+  for (const [data, path] of uploaded) if (gone.has(path)) uploaded.delete(data);
+}
+
 /* ---------- Signed URLs: batched, cached, refreshed before they expire ---------- */
 
 const SIGN_TTL = 3600, SIGN_MARGIN = 300_000;
@@ -141,8 +147,20 @@ async function flushSignQueue() {
   }
 }
 
-/** Download a Storage image as a data URL (export, publish, backup, pixel editing). */
-export async function imageData(path: string): Promise<string> {
+const downloaded = new Map<string, Promise<string>>();
+
+/** Download a Storage image as a data URL (export, publish, backup, pixel editing). Paths are content hashes, so cache them. */
+export function imageData(path: string): Promise<string> {
+  let hit = downloaded.get(path);
+  if (!hit) {
+    hit = fetchImageData(path);
+    hit.catch(() => downloaded.delete(path));
+    downloaded.set(path, hit);
+  }
+  return hit;
+}
+
+async function fetchImageData(path: string): Promise<string> {
   const { data, error } = await createClient().storage.from(BUCKET).download(path);
   if (error || !data) throw new Error("อ่านรูปจากคลาวด์ไม่ได้");
   return new Promise((resolve, reject) => {
