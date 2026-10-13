@@ -5,9 +5,10 @@
  * every change bumps a version, saves run one at a time 250 ms after the last
  * change, and a failed save stops further saves until the user acts.
  */
+import { produce } from "immer";
 import { create } from "zustand";
 import { ConflictError, loadWorkspace, saveWorkspace } from "@/lib/cloud";
-import { copy, type Project } from "@/lib/guide-core";
+import type { Project } from "@/lib/guide-core";
 
 type State = {
   wid: string | null;
@@ -20,11 +21,13 @@ type State = {
   savedVersion: number;
   saveError: string;
   conflict: boolean;
+  /** Bumps on every (re)load, so uncontrolled inputs can reset to the fresh document. */
+  loadId: number;
 };
 
 type Actions = {
   load: (wid: string) => Promise<void>;
-  /** Apply a change to a draft copy of the projects; `touch` bumps that project's updatedAt. */
+  /** Apply a change to an immer draft of the projects; `touch` bumps that project's updatedAt. */
   update: (change: (projects: Project[]) => void, touch?: string) => void;
   flush: () => Promise<void>;
   retry: () => Promise<void>;
@@ -46,6 +49,7 @@ export const useWorkspace = create<State & Actions>()((set, get) => ({
   savedVersion: 0,
   saveError: "",
   conflict: false,
+  loadId: 0,
 
   async load(wid) {
     clearTimeout(timer);
@@ -53,19 +57,20 @@ export const useWorkspace = create<State & Actions>()((set, get) => ({
     try {
       const w = await loadWorkspace(wid);
       if (get().wid !== wid) return;
-      set({ name: w.name, revision: w.revision, projects: w.projects, status: "ready" });
+      set((s) => ({ name: w.name, revision: w.revision, projects: w.projects, status: "ready", loadId: s.loadId + 1 }));
     } catch (e) {
       if (get().wid === wid) set({ status: "error", loadError: (e as Error).message });
     }
   },
 
   update(change, touch) {
-    const projects = copy(get().projects);
-    change(projects);
-    if (touch) {
-      const p = projects.find((x) => x.id === touch);
-      if (p) p.updatedAt = new Date().toISOString();
-    }
+    const projects = produce(get().projects, (draft) => {
+      change(draft);
+      if (touch) {
+        const p = draft.find((x) => x.id === touch);
+        if (p) p.updatedAt = new Date().toISOString();
+      }
+    });
     set((s) => ({ projects, changeVersion: s.changeVersion + 1 }));
     clearTimeout(timer);
     timer = setTimeout(() => void get().flush(), 250);
