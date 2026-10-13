@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_KEY, SUPABASE_URL } from "./env";
 
 /** Paths reachable without a session. */
-const PUBLIC_PATHS = ["/login", "/signup", "/forgot-password", "/auth", "/g"];
+const PUBLIC_PATHS = ["/login", "/auth", "/g"];
 const isPublic = (path: string) => PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "/"));
 
 /** Refreshes the auth cookies on every request and sends logged-out users to /login. */
@@ -35,7 +35,7 @@ export async function updateSession(request: NextRequest) {
     url.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + request.nextUrl.search)}`;
     return NextResponse.redirect(url);
   }
-  if (data?.claims && (pathname === "/login" || pathname === "/signup")) {
+  if (data?.claims && pathname === "/login") {
     return NextResponse.redirect(new URL("/workspaces", request.url));
   }
   return response;

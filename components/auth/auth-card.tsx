@@ -10,19 +10,19 @@ export function AuthCard({ title, description, children, footer }: {
 }) {
   return (
     <main className="flex min-h-svh items-center justify-center bg-muted/40 p-6">
-      <div className="w-full max-w-sm space-y-6">
+      <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center gap-2 text-center">
           <Image src="/brand/1dd-logo.png" alt="1DD" width={56} height={56} priority />
           <span className="text-2xl font-medium tracking-tight">Guide</span>
         </div>
-        <Card>
+        <Card className="p-2 sm:p-4">
           <CardHeader>
-            <CardTitle>{title}</CardTitle>
+            <CardTitle className="text-xl">{title}</CardTitle>
             {description && <CardDescription>{description}</CardDescription>}
           </CardHeader>
           <CardContent>{children}</CardContent>
         </Card>
-        {footer && <div className="text-center text-sm text-muted-foreground">{footer}</div>}
+        {footer && <div className="space-y-1 text-center text-sm text-muted-foreground">{footer}</div>}
       </div>
     </main>
   );
