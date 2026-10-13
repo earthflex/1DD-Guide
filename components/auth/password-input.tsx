@@ -5,16 +5,21 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-/** Password field with a show/hide toggle inside the input. */
-export function PasswordInput({ className, ...props }: Omit<React.ComponentProps<"input">, "type">) {
-  const [visible, setVisible] = useState(false);
+/** Password field with a show/hide toggle inside the input. `revealed` makes the toggle controlled. */
+export function PasswordInput({ className, revealed, onRevealedChange, ...props }: Omit<React.ComponentProps<"input">, "type"> & {
+  revealed?: boolean;
+  onRevealedChange?: (v: boolean) => void;
+}) {
+  const [own, setOwn] = useState(false);
+  const visible = revealed ?? own;
+  const setVisible = (v: boolean) => { setOwn(v); onRevealedChange?.(v); };
   const label = visible ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน";
   return (
     <div className="relative">
       <Input type={visible ? "text" : "password"} className={cn("pr-11", className)} {...props} />
       <button
         type="button"
-        onClick={() => setVisible((v) => !v)}
+        onClick={() => setVisible(!visible)}
         aria-label={label}
         aria-pressed={visible}
         title={label}
