@@ -1,18 +1,33 @@
 "use client";
 
-import { ArrowLeftRight, Check, CircleAlert, LayoutGrid, Loader2, LogOut, RotateCw } from "lucide-react";
+import {
+  ArrowLeft, ArrowLeftRight, Check, ChevronsUpDown, FolderOpen, Gauge, KeyRound, CircleAlert, CircleHelp, Download, History, Images, LayoutGrid, Loader2, LogOut, Plus,
+  Puzzle, RefreshCw, RotateCw, Settings, Settings2, Upload, Users,
+} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
+import { AppDialogs } from "@/components/app-dialogs";
+import { InlineInput } from "@/components/inline-input";
+import { ConfirmHost, confirmDialog } from "@/components/confirm";
+import { openPageDialog, PageDialogHost } from "@/components/editor/page-dialog";
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarHeader, SidebarInset,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
+  SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { hasUnsaved, saveStateOf, useWorkspace } from "@/lib/store";
+import { exportJSON, renameProject } from "@/lib/projects";
+import { loadPublications } from "@/lib/publications";
+import { openDialog } from "@/lib/ui";
 import { lastWorkspace, signOut } from "@/lib/workspaces";
+import { importGuideFile } from "@/components/workspace/import-guide";
 
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const { wid } = useParams<{ wid: string }>();
@@ -24,6 +39,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (useWorkspace.getState().wid !== wid) void load(wid);
     lastWorkspace.set(wid);
+    void loadPublications(wid);
   }, [wid, load]);
 
   // Warn before closing the tab while a save is pending, like the legacy app.
@@ -62,12 +78,20 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
       </SidebarInset>
+      <ConfirmHost />
+      <PageDialogHost />
+      <AppDialogs />
     </SidebarProvider>
   );
 }
 
 function WorkspaceSidebar({ wid }: { wid: string }) {
   const router = useRouter();
+  const { pid, pageId } = useParams<{ pid?: string; pageId?: string }>();
+  const project = useWorkspace((s) => (pid ? s.projects.find((p) => p.id === pid) : undefined));
+  const activePage = project?.pages.find((q) => q.id === pageId) ?? project?.pages[0];
+  const pathname = usePathname();
+  const onMedia = pathname.endsWith("/media"), onMembers = pathname.endsWith("/members");
   async function logout() {
     await useWorkspace.getState().flush();
     await signOut();
@@ -87,8 +111,69 @@ function WorkspaceSidebar({ wid }: { wid: string }) {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive>
-                  <Link href={`/w/${wid}`}><LayoutGrid />โปรเจกต์ทั้งหมด</Link>
+                <SidebarMenuButton asChild isActive={!project && pathname === `/w/${wid}`}>
+                  <Link href={`/w/${wid}`}>{project ? <ArrowLeft /> : <LayoutGrid />}โปรเจกต์ทั้งหมด</Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        {project && (
+          <SidebarGroup>
+            <div className="px-2 pb-2">
+              <InlineInput value={project.name} maxLength={120} aria-label={`ชื่อโปรเจกต์ ${project.name}`} title="พิมพ์เพื่อแก้ชื่อโปรเจกต์"
+                onCommit={(v) => renameProject(project.id, v)} className="font-medium" />
+              <p className="truncate text-xs text-muted-foreground">{project.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "") || "ยังไม่ได้ระบุเว็บไซต์"}</p>
+            </div>
+            <SidebarGroupLabel>เนื้อหา</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu aria-label="เนื้อหา">
+                {project.pages.map((q, n) => (
+                  <SidebarMenuItem key={q.id}>
+                    <SidebarMenuButton asChild isActive={q.id === activePage?.id} className="h-auto py-2 data-[active=true]:bg-brand/10 data-[active=true]:text-foreground">
+                      <Link href={`/w/${wid}/p/${project.id}/${q.id}`} aria-current={q.id === activePage?.id ? "page" : undefined}>
+                        <span className="w-5 shrink-0 text-xs text-muted-foreground tabular-nums">{String(n + 1).padStart(2, "0")}</span>
+                        <span className="line-clamp-2">{q.title || "เนื้อหาใหม่"}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={() => openPageDialog(project.id)} className="text-muted-foreground">
+                    <Plus />เพิ่มเนื้อหา
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+        {project && (
+          <SidebarGroup className="pt-0">
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={() => openDialog({ kind: "project-settings", pid: project.id })}><Settings2 />ตั้งค่าโปรเจกต์</SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={onMedia}>
+                  <Link href={`/w/${wid}/media`}><Images />คลังไฟล์</Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname.endsWith("/activity")}>
+                  <Link href={`/w/${wid}/activity`}><History />กิจกรรม</Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={onMembers}>
+                  <Link href={`/w/${wid}/members`}><Users />สมาชิก</Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -98,12 +183,7 @@ function WorkspaceSidebar({ wid }: { wid: string }) {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild>
-              <Link href="/workspaces"><ArrowLeftRight />เปลี่ยน Workspace</Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={logout}><LogOut />ออกจากระบบ</SidebarMenuButton>
+            <WorkspaceMenu wid={wid} onLogout={logout} />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
@@ -112,9 +192,20 @@ function WorkspaceSidebar({ wid }: { wid: string }) {
 }
 
 function WorkspaceName() {
+  const { wid, pid, pageId } = useParams<{ wid: string; pid?: string; pageId?: string }>();
   const name = useWorkspace((s) => s.name);
   const ready = useWorkspace((s) => s.status === "ready");
-  return ready ? <span className="truncate text-sm font-medium">{name}</span> : <Skeleton className="h-4 w-32" />;
+  const project = useWorkspace((s) => (pid ? s.projects.find((p) => p.id === pid) : undefined));
+  const page = project?.pages.find((q) => q.id === pageId) ?? project?.pages[0];
+  const title = page ? `${page.title} · ${project!.name}` : project?.name ?? name;
+  useEffect(() => { if (ready && title) document.title = `${title} — 1DD Guide`; }, [ready, title]);
+  if (!ready) return <Skeleton className="h-4 w-32" />;
+  return (
+    <nav aria-label="ตำแหน่งปัจจุบัน" className="flex min-w-0 items-center gap-1.5 text-sm">
+      {project ? <Link href={`/w/${wid}`} className="truncate text-muted-foreground hover:text-foreground">{name}</Link> : <strong className="truncate font-medium">{name}</strong>}
+      {project && <><span className="text-muted-foreground">/</span><strong className="truncate font-medium">{project.name}</strong></>}
+    </nav>
+  );
 }
 
 function SaveStatus() {
@@ -143,9 +234,83 @@ function SaveBanner() {
   return (
     <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-sm text-destructive">
       <span className="flex-1">{saveError}</span>
-      {conflict && wid
-        ? <Button size="sm" variant="outline" onClick={() => load(wid)}>โหลดล่าสุดจากคลาวด์</Button>
-        : <Button size="sm" variant="outline" onClick={retry}>ลองบันทึกอีกครั้ง</Button>}
+      <Button size="sm" variant="outline" onClick={() => exportJSON(useWorkspace.getState().projects)}>สำรองข้อมูล</Button>
+      {!conflict && <Button size="sm" variant="outline" onClick={retry}>ลองบันทึกอีกครั้ง</Button>}
+      {wid && <Button size="sm" variant="outline" onClick={() => load(wid)}>โหลดล่าสุดจากคลาวด์</Button>}
     </div>
+  );
+}
+
+/** Workspace actions from the legacy "เพิ่มเติม" menu, in one dropdown at the bottom of the sidebar. */
+function WorkspaceMenu({ wid, onLogout }: { wid: string; onLogout: () => void }) {
+  const router = useRouter();
+  const name = useWorkspace((s) => s.name);
+  const importInput = useRef<HTMLInputElement>(null);
+
+  async function reload() {
+    const ws = useWorkspace.getState();
+    if (hasUnsaved() || ws.saveError) {
+      const ok = await confirmDialog("โหลดข้อมูลล่าสุด", "งานที่ยังไม่ได้บันทึกในหน้านี้จะหายไป แนะนำให้สำรอง JSON ก่อน", "โหลดล่าสุด", true);
+      if (!ok) return;
+    }
+    await ws.load(wid);
+    toast.success("โหลดข้อมูลล่าสุดแล้ว");
+  }
+
+  async function onImport(ev: React.ChangeEvent<HTMLInputElement>) {
+    const file = ev.target.files?.[0];
+    ev.target.value = "";
+    if (!file) return;
+    try {
+      const first = await importGuideFile(file);
+      if (!first) return;
+      toast.success("นำเข้าคู่มือเรียบร้อยแล้ว");
+      router.push(`/w/${wid}/p/${first.id}/${first.pages[0]?.id ?? "new"}`);
+    } catch (e) { toast.error((e as Error).message); }
+  }
+
+  function openImport() {
+    importInput.current?.click();
+  }
+
+  function backupAll() {
+    const { projects } = useWorkspace.getState();
+    if (!projects.length) toast.info("ยังไม่มีโปรเจกต์ให้สำรอง");
+    else void exportJSON(projects);
+  }
+
+  return (
+    <>
+      <input ref={importInput} type="file" accept="application/json,.json" hidden onChange={onImport} />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <SidebarMenuButton size="lg" aria-label="เมนู Workspace" className="data-[state=open]:bg-sidebar-accent">
+            <span className="grid size-8 shrink-0 place-items-center rounded-md bg-brand/10 text-brand"><FolderOpen className="size-4" /></span>
+            <span className="grid min-w-0 flex-1 leading-tight">
+              <span className="truncate font-medium">{name || "Workspace"}</span>
+              <span className="truncate text-xs text-muted-foreground">ทีม · ข้อมูล · ช่วยเหลือ</span>
+            </span>
+            <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+          </SidebarMenuButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" className="w-(--radix-dropdown-menu-trigger-width) min-w-56">
+          <DropdownMenuLabel>Workspace</DropdownMenuLabel>
+          <DropdownMenuItem asChild><Link href={`/w/${wid}/members`}><Users />สมาชิกในทีม</Link></DropdownMenuItem>
+          <DropdownMenuItem onSelect={backupAll}><Download />สำรองข้อมูลทั้งหมด</DropdownMenuItem>
+          <DropdownMenuItem onSelect={openImport}><Upload />นำเข้าคู่มือ</DropdownMenuItem>
+          <DropdownMenuItem onSelect={reload}><RefreshCw />โหลดข้อมูลล่าสุด</DropdownMenuItem>
+          <DropdownMenuItem asChild><Link href={`/w/${wid}/settings`}><Settings />ตั้งค่า Workspace</Link></DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>ช่วยเหลือ</DropdownMenuLabel>
+          <DropdownMenuItem onSelect={() => openDialog({ kind: "extension" })}><Puzzle />ส่วนขยายจับภาพ</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => openDialog({ kind: "help" })}><CircleHelp />วิธีใช้งาน</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => openDialog({ kind: "password" })}><KeyRound />เปลี่ยนรหัสผ่าน</DropdownMenuItem>
+          <DropdownMenuItem asChild><Link href="/workspaces"><ArrowLeftRight />เปลี่ยน Workspace</Link></DropdownMenuItem>
+          <DropdownMenuItem asChild><Link href="/system"><Gauge />ภาพรวมระบบ (ทุก Workspace)</Link></DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" onSelect={onLogout}><LogOut />ออกจากระบบ</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 }

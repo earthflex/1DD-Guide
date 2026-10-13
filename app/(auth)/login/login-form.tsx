@@ -47,7 +47,7 @@ export function LoginForm() {
           name="email"
           type="email"
           autoComplete="username"
-          placeholder="name@1dd.co"
+          placeholder="name@example.com"
           required
           autoFocus
           className="h-11 px-3.5 text-base md:text-base"

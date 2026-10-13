@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronRight, FolderOpen, LogOut, Plus } from "lucide-react";
+import { ChevronRight, FolderOpen, Gauge, LogOut, Plus } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -49,7 +50,10 @@ export function WorkspaceList() {
       ))}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
         <NewWorkspaceDialog onCreated={open} trigger={<Button><Plus />สร้าง Workspace ใหม่</Button>} />
-        <Button variant="ghost" onClick={logout}><LogOut />ออกจากระบบ</Button>
+        <div className="flex gap-1">
+          <Button asChild variant="ghost"><Link href="/system"><Gauge />ภาพรวมระบบ</Link></Button>
+          <Button variant="ghost" onClick={logout}><LogOut />ออกจากระบบ</Button>
+        </div>
       </div>
     </div>
   );

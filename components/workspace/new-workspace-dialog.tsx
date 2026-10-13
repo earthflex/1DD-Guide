@@ -42,7 +42,7 @@ export function NewWorkspaceDialog({ onCreated, trigger }: { onCreated: (id: str
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="ws-name">ชื่อ Workspace</Label>
-            <Input id="ws-name" name="name" required maxLength={120} placeholder="เช่น 1DD Team" autoFocus />
+            <Input id="ws-name" name="name" required maxLength={120} placeholder="เช่น ชื่อทีมหรือแผนก" autoFocus />
           </div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
