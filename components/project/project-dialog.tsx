@@ -25,7 +25,10 @@ export function ProjectForm({ project, onDone }: { project?: Project; onDone: ()
   const wid = useWorkspace((s) => s.wid);
   const [template, setTemplate] = useState("new");
   const [name, setName] = useState(project?.name ?? "");
-  const [branding, setBranding] = useState<Branding>({ logo: project?.logo ?? "", keepPath: !!project?._logoPath, logoText: project?.logoText ?? "" });
+  const [branding, setBranding] = useState<Branding>({
+    logo: project?.logo ?? "", keepPath: !!project?._logoPath, logoText: project?.logoText ?? "",
+    coverTitle: project?.coverTitle ?? "", coverCredit: project?.coverCredit ?? "",
+  });
   const [error, setError] = useState("");
 
   function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -134,7 +137,7 @@ function LogoFields({ branding, onChange, name, logoPath }: {
 
   return (
     <fieldset className="grid gap-3 rounded-lg border p-4">
-      <legend className="px-1 text-sm font-medium">โลโก้ลูกค้าบนหน้าปก PDF</legend>
+      <legend className="px-1 text-sm font-medium">หน้าปก PDF</legend>
       <div className="flex flex-wrap items-start gap-4">
         <div aria-label="ตัวอย่างโลโก้ลูกค้า" className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-md border bg-white p-2 text-center text-xs font-medium">
           {branding.logo ? (
@@ -164,6 +167,18 @@ function LogoFields({ branding, onChange, name, logoPath }: {
         <Label htmlFor="logo-text">ข้อความแทนโลโก้</Label>
         <Input id="logo-text" maxLength={120} value={branding.logoText} onChange={(e) => onChange({ ...branding, logoText: e.target.value })} placeholder="ชื่อที่จะแสดงบนหน้าปก" />
         <p className="text-xs text-muted-foreground">ใช้เมื่อไม่มีรูปโลโก้ หากเว้นว่างจะใช้ชื่อโปรเจกต์</p>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="cover-title">หัวข้อหน้าปก</Label>
+        <Textarea id="cover-title" rows={2} maxLength={120} value={branding.coverTitle}
+          onChange={(e) => onChange({ ...branding, coverTitle: e.target.value })}
+          placeholder={"CONTENT UPLOAD\nTUTORIAL"} className="font-medium" />
+        <p className="text-xs text-muted-foreground">ขึ้นบรรทัดใหม่ได้ไม่เกิน 3 บรรทัด · เว้นว่างจะใช้ CONTENT UPLOAD TUTORIAL</p>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="cover-credit">ข้อความผู้จัดทำ (มุมขวาล่าง)</Label>
+        <Input id="cover-credit" maxLength={80} value={branding.coverCredit}
+          onChange={(e) => onChange({ ...branding, coverCredit: e.target.value })} placeholder="BY 1DD HUB CO.,LTD" />
       </div>
     </fieldset>
   );
