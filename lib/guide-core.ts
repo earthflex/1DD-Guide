@@ -8,15 +8,22 @@ export const VERSION = 2;
 
 export type Step = { id: string; x: number | null; y: number | null; title: string; text: string };
 export type Highlight = { id: string; x: number; y: number; width: number; height: number };
+/** Arrow from (x1,y1) to the head at (x2,y2), in 0–1 image coordinates. */
+export type Arrow = { id: string; x1: number; y1: number; x2: number; y2: number };
 export type Frame = {
   id: string;
   /** Base64 data URL for an image that is not uploaded yet; "" once it lives in Storage. */
   image: string;
   /** Storage path `wid/<sha256>.<ext>` of an uploaded image (cloud format). */
   _imagePath?: string;
+  /** Optional second image shown to the right of the first ("pair"); annotations span both. */
+  image2?: string;
+  _imagePath2?: string;
   imageLabel?: string;
   steps: Step[];
   highlights: Highlight[];
+  /** Optional: absent in documents written before arrows existed. */
+  arrows?: Arrow[];
 };
 export type Page = Frame & {
   title: string;
@@ -36,6 +43,10 @@ export type Project = {
   logo?: string;
   _logoPath?: string;
   logoText?: string;
+  /** PDF cover headline (up to 3 lines); empty means the default "CONTENT UPLOAD / TUTORIAL". */
+  coverTitle?: string;
+  /** PDF cover credit line; empty means "BY 1DD HUB CO.,LTD". */
+  coverCredit?: string;
   pages: Page[];
 };
 export type GuideFile = { format: "1dd-guide"; version: number; exportedAt: string; projects: Project[] };
@@ -116,6 +127,8 @@ function clean(raw: any, { cloud }: CleanOptions = {}): Project[] {
       out._logoPath = p._logoPath;
     }
     if (p.logoText !== undefined) out.logoText = str(p.logoText, 120).trim();
+    if (typeof p.coverTitle === "string" && p.coverTitle.trim()) out.coverTitle = str(p.coverTitle, 120).trim();
+    if (typeof p.coverCredit === "string" && p.coverCredit.trim()) out.coverCredit = str(p.coverCredit, 80).trim();
     totalImages += (out.logo || "").length;
     if (totalImages > 80000000) throw new Error("ข้อมูลภาพรวมเกิน 80 MB กรุณาแยกสำรองเป็นรายโปรเจกต์");
     out.color = colors.includes(p.color) ? p.color : colors[0];
@@ -134,6 +147,14 @@ function clean(raw: any, { cloud }: CleanOptions = {}): Project[] {
           if (!imgPath!.test(f._imagePath)) throw new Error("ตำแหน่งภาพไม่ถูกต้อง");
           out._imagePath = f._imagePath;
         }
+        if (f.image2 && !imageURL(f.image2)) throw new Error("รองรับภาพ PNG, JPEG และ WebP ที่ฝังอยู่ในไฟล์เท่านั้น");
+        totalImages += (f.image2 || "").length;
+        if (totalImages > 80000000) throw new Error("ข้อมูลภาพรวมเกิน 80 MB กรุณาแยกสำรองเป็นรายโปรเจกต์");
+        if (f.image2) out.image2 = f.image2;
+        if (cloud && f._imagePath2) {
+          if (!imgPath!.test(f._imagePath2)) throw new Error("ตำแหน่งภาพไม่ถูกต้อง");
+          out._imagePath2 = f._imagePath2;
+        }
         if (typeof f.imageLabel === "string") out.imageLabel = str(f.imageLabel, 80).trim();
         out.steps = f.steps.map((s: any) => {
           if (s && s.x === null && s.y === null) return { id: keepId(s.id), x: null, y: null, title: str(s.title, 200), text: str(s.text) };
@@ -147,15 +168,26 @@ function clean(raw: any, { cloud }: CleanOptions = {}): Project[] {
             throw new Error("ตำแหน่งกรอบไฮไลท์ไม่ถูกต้อง");
           return { id: keepId(h.id), x: h.x, y: h.y, width: h.width, height: h.height };
         });
-        if (!out.image && !out._imagePath && (out.steps.some(placed) || out.highlights.length)) throw new Error("เนื้อหามีหมายเลขแต่ไม่มีภาพ");
+        if (f.arrows !== undefined) {
+          if (!Array.isArray(f.arrows) || f.arrows.length > 100) throw new Error("ข้อมูลลูกศรไม่ถูกต้อง");
+          out.arrows = f.arrows.map((a: any) => {
+            if (!a || !["x1", "y1", "x2", "y2"].every((k) => typeof a[k] === "number" && Number.isFinite(a[k]) && a[k] >= 0 && a[k] <= 1))
+              throw new Error("ตำแหน่งลูกศรไม่ถูกต้อง");
+            return { id: keepId(a.id), x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2 };
+          });
+        }
+        if (!out.image && !out._imagePath && (out.steps.some(placed) || out.highlights.length || out.arrows?.length)) throw new Error("เนื้อหามีหมายเลขแต่ไม่มีภาพ");
         return out;
       };
       const first = cleanFrame(q);
       np.id = first.id;
       np.image = first.image;
       if (first._imagePath) np._imagePath = first._imagePath;
+      if (first.image2) np.image2 = first.image2;
+      if (first._imagePath2) np._imagePath2 = first._imagePath2;
       np.steps = first.steps;
       np.highlights = first.highlights;
+      if (first.arrows) np.arrows = first.arrows;
       if (first.imageLabel !== undefined) np.imageLabel = first.imageLabel;
       np.extraImages = (q.extraImages || []).map(cleanFrame);
       return np;
@@ -177,6 +209,31 @@ export const pack = (projects: Project[]): GuideFile => ({
 });
 export const filename = (s: string) =>
   String(s).replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").trim().slice(0, 90) || "1dd-guide";
+
+/* ---------- paired images (two columns in one frame) ---------- */
+
+/** Gap between the two images, and the width of each column, as fractions of the frame width. */
+export const PAIR_GAP = 0.02;
+export const PAIR_COL = (1 - PAIR_GAP) / 2;
+export const isPair = (f: Pick<Frame, "image2" | "_imagePath2">) => !!(f.image2 || f._imagePath2);
+
+export type Box = { x: number; y: number; w: number; h: number };
+
+/**
+ * Geometry of a paired frame. `r1`/`r2` are height/width ratios of the images. Returns the frame's
+ * height/width ratio and where each image sits, in 0–1 frame coordinates (the space annotations use).
+ * Editor, viewer and print all lay pairs out this way: equal columns, 2% gap, aligned to the top.
+ */
+export function pairLayout(r1: number, r2: number): { aspect: number; boxes: [Box, Box] } {
+  const aspect = Math.max(PAIR_COL * r1, PAIR_COL * r2);
+  return {
+    aspect,
+    boxes: [
+      { x: 0, y: 0, w: PAIR_COL, h: (PAIR_COL * r1) / aspect },
+      { x: PAIR_COL + PAIR_GAP, y: 0, w: PAIR_COL, h: (PAIR_COL * r2) / aspect },
+    ],
+  };
+}
 
 /** First image of a project, used as the card cover. */
 export const coverOf = (p: Project) => p.pages.flatMap(frames).find((f) => f.image || f._imagePath);

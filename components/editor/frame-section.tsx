@@ -1,33 +1,37 @@
 "use client";
 
 import {
-  ArrowDown, ArrowUp, Camera, ChevronDown, Image as ImageIcon, MapPin, MousePointer2, Plus, Square,
+  ArrowDown, ArrowUp, Camera, ChevronDown, Columns2, Image as ImageIcon, MapPin, MousePointer2, MoveUpRight, Plus, Square,
   SquareDashed, Trash2, Undo2, Upload,
 } from "lucide-react";
+import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm";
 import { AnnotationCanvas } from "@/components/editor/annotation-canvas";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  activateFrame, addPin, applyUndo, deleteHighlight, moveStep, removeImage, stepField, useEditor, type Tool,
+  activateFrame, addPin, applyUndo, deleteArrow, deleteHighlight, removeSecondImage, moveStep, removeImage, stepField, useEditor, type Tool,
 } from "@/lib/editor";
-import { placed, type Frame } from "@/lib/guide-core";
+import { isPair, placed, type Frame } from "@/lib/guide-core";
 import { cn } from "@/lib/utils";
+import { visible } from "@/lib/dom";
 
 const toolHint = (f: Frame, mode: Tool) =>
   mode === "pin"
     ? f.steps.some((s) => !placed(s)) ? "คลิกบนภาพเพื่อวาง Point ที่เลือก · ข้อความเดิมจะยังอยู่" : "คลิกบนภาพเพื่อเพิ่มหมายเลข · ลากจุดเพื่อย้าย"
     : mode === "highlight" ? "ลากบนภาพเพื่อสร้างกรอบไฮไลท์สีส้ม"
+    : mode === "arrow" ? "ลากจากจุดเริ่มไปยังจุดที่ต้องการชี้ หัวลูกศรอยู่ปลายทาง"
     : mode === "redact" ? "ลากกรอบบนภาพเพื่อปิดทับข้อมูลถาวร"
-    : "เลือกหมายเลขหรือกรอบเพื่อแก้ไข · ลากเพื่อย้าย";
+    : "เลือกหมายเลข กรอบ หรือลูกศรเพื่อแก้ไข · ลากเพื่อย้าย · ลากปลายลูกศรเพื่อยืด หด หรือหมุน";
 
-export type ImageSource = { upload: (frameId: string) => void; capture: (frameId: string) => void };
+/** Where new images come from. Slot 2 is the right-hand image of a two-column pair. */
+export type ImageSource = { upload: (frameId: string, slot?: 1 | 2) => void; capture: (frameId: string, slot?: 1 | 2) => void };
 
 /** One image of a page: toolbar, annotation canvas and its Point list. Ported from editorFrame(). */
 export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
@@ -40,6 +44,12 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
   const canUndo = useEditor((s) => s.undo.some((u) => u.id === f.id));
   const mode: Tool = isActive ? tool : "select";
   const hasImage = !!(f.image || f._imagePath);
+  const pair = isPair(f);
+
+  async function removeRight() {
+    if (!(await confirmDialog("ลบภาพขวา", "Point ไฮไลท์ และลูกศรที่อยู่บนภาพขวาจะถูกนำออก ส่วนของภาพซ้ายยังอยู่ที่เดิม", "ลบภาพขวา", true))) return;
+    removeSecondImage(f.id).catch((e: Error) => toast.error(e.message));
+  }
 
   const setTool = (t: string) => {
     if (!t) return;
@@ -71,6 +81,7 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
                 <ToggleGroupItem value="select" aria-label="เลือก"><MousePointer2 />เลือก</ToggleGroupItem>
                 <ToggleGroupItem value="pin" disabled={!hasImage} aria-label="ปักหมายเลข"><MapPin />ปักหมายเลข</ToggleGroupItem>
                 <ToggleGroupItem value="highlight" disabled={!hasImage} aria-label="กรอบไฮไลท์"><Square />ไฮไลท์</ToggleGroupItem>
+                <ToggleGroupItem value="arrow" disabled={!hasImage} aria-label="ลูกศร"><MoveUpRight />ลูกศร</ToggleGroupItem>
                 <ToggleGroupItem value="redact" disabled={!hasImage} aria-label="ปิดทับ"><SquareDashed />ปิดทับ</ToggleGroupItem>
               </ToggleGroup>
               <Tooltip>
@@ -89,10 +100,26 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
                   <Button variant="outline" size="sm"><ImageIcon />{hasImage ? "เปลี่ยนภาพ" : "เพิ่มภาพ"}<ChevronDown /></Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {pair && <DropdownMenuLabel className="text-xs text-muted-foreground">ภาพซ้าย</DropdownMenuLabel>}
                   <DropdownMenuItem onSelect={() => source.upload(f.id)}><Upload />อัปโหลดภาพ</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => source.capture(f.id)}><Camera />จับภาพแท็บ / หน้าต่าง</DropdownMenuItem>
+                  {hasImage && <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">{pair ? "ภาพขวา" : "วางภาพที่ 2 คู่กัน (2 คอลัมน์)"}</DropdownMenuLabel>
+                    <DropdownMenuItem onSelect={() => source.upload(f.id, 2)}><Upload />{pair ? "เปลี่ยนภาพขวา (อัปโหลด)" : "อัปโหลดภาพที่ 2"}</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => source.capture(f.id, 2)}><Camera />{pair ? "เปลี่ยนภาพขวา (จับภาพ)" : "จับภาพที่ 2"}</DropdownMenuItem>
+                    {pair && <DropdownMenuItem variant="destructive" onSelect={removeRight}><Trash2 />ลบภาพขวา</DropdownMenuItem>}
+                  </>}
                 </DropdownMenuContent>
               </DropdownMenu>
+              {hasImage && !pair && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="sm" onClick={() => source.upload(f.id, 2)}><Columns2 />เพิ่มภาพคู่</Button>
+                  </TooltipTrigger>
+                  <TooltipContent>วางภาพที่ 2 ไว้ด้านขวา ใช้ Point ชุดเดียวกัน</TooltipContent>
+                </Tooltip>
+              )}
               {hasImage && (
                 <Button variant="outline" size="sm" onClick={remove} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
                   <Trash2 />ลบภาพ
@@ -119,6 +146,9 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
             <span>{toolHint(f, mode)}</span>
             {isActive && selectedBox && f.highlights.some((h) => h.id === selectedBox) && (
               <Button variant="ghost" size="sm" onClick={() => deleteHighlight(f.id, selectedBox)}><Trash2 />ลบกรอบที่เลือก</Button>
+            )}
+            {isActive && selectedBox && f.arrows?.some((a) => a.id === selectedBox) && (
+              <Button variant="ghost" size="sm" onClick={() => deleteArrow(f.id, selectedBox)}><Trash2 />ลบลูกศรที่เลือก</Button>
             )}
           </div>
         </section>
@@ -185,7 +215,7 @@ function Inspector({ frame: f, n, hasImage }: { frame: Frame; n: number; hasImag
                   onClick={() => {
                     activateFrame(f.id);
                     useEditor.setState({ selected: s.id, tool: "pin" });
-                    document.getElementById(`canvas-${f.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                    visible(`#canvas-${f.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
                   }}>
                   <MapPin />{hasImage ? "วางจุดบนภาพ" : "รอเพิ่มภาพ"}
                 </Button>

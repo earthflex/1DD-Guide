@@ -1,5 +1,5 @@
 /** Image helpers ported from legacy/app.js: decode, shrink to WebP, read files, capture the screen, redact. */
-import { imageData } from "@/lib/cloud";
+import { imageData, signedUrl } from "@/lib/cloud";
 import { logoURL, type Frame } from "@/lib/guide-core";
 
 const MAX_IMAGE_WIDTH = 1920, IMAGE_QUALITY = 0.85;
@@ -83,6 +83,18 @@ export async function captureScreen() {
 /** The frame image as a data URL, downloading it from Storage if needed. */
 export const frameData = (f: Pick<Frame, "image" | "_imagePath">) =>
   f.image ? Promise.resolve(f.image) : f._imagePath ? imageData(f._imagePath) : Promise.reject(new Error("ไม่มีภาพ"));
+
+/** Data URL of one of a frame's images: 1 = left/only, 2 = right image of a pair. */
+export const slotData = (f: Pick<Frame, "image" | "_imagePath" | "image2" | "_imagePath2">, slot: 1 | 2) =>
+  slot === 1 ? frameData(f) : frameData({ image: f.image2 ?? "", _imagePath: f._imagePath2 });
+
+/** Height/width ratio of an image given as a data URL or a Storage path. */
+export async function imageRatio(image?: string, path?: string) {
+  const src = image || (path ? await signedUrl(path) : "");
+  if (!src) throw new Error("ไม่มีภาพ");
+  const img = await decodeImage(src);
+  return img.naturalHeight / img.naturalWidth;
+}
 
 /** Paint a solid box into the image pixels. Rect is in 0–1 image coordinates. */
 export async function redact(src: string, r: { x: number; y: number; width: number; height: number }) {

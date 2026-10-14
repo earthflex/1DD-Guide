@@ -40,12 +40,16 @@ export function setProjectWebsite(pid: string, raw: string) {
 }
 
 /** Logo edit from the project dialog: `logo` data URL for a new upload, `keepPath` to keep the stored one. */
-export type Branding = { logo: string; keepPath: boolean; logoText: string };
+export type Branding = { logo: string; keepPath: boolean; logoText: string; coverTitle: string; coverCredit: string };
 
 export function applyBranding(p: Project, b: Branding) {
   if (b.logo) { p.logo = b.logo; delete p._logoPath; }
   else if (!b.keepPath) { p.logo = ""; delete p._logoPath; }
   p.logoText = b.logoText.trim().slice(0, 120);
+  const title = b.coverTitle.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3).join("\n").slice(0, 120);
+  if (title) p.coverTitle = title; else delete p.coverTitle;
+  const credit = b.coverCredit.trim().slice(0, 80);
+  if (credit) p.coverCredit = credit; else delete p.coverCredit;
 }
 
 export function saveProjectSettings(pid: string, values: { name: string; website: string; description: string } & Branding) {
@@ -77,6 +81,7 @@ export function duplicateProject(pid: string) {
       if (f !== q) f.id = uid();
       f.steps.forEach((s) => (s.id = uid()));
       (f.highlights || []).forEach((h) => (h.id = uid()));
+      (f.arrows || []).forEach((x) => (x.id = uid()));
     }
   }
   addProject(clone);

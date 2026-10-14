@@ -67,6 +67,11 @@ export async function saveWorkspace(wid: string, revision: number, projects: Pro
         f._imagePath = await imagePath(f.image, wid);
         f.image = "";
       }
+      if (f.image2) {
+        if (!imageURL(f.image2)) throw new Error("รูปไม่ถูกต้อง");
+        f._imagePath2 = await imagePath(f.image2, wid);
+        f.image2 = "";
+      }
     }
   }
   const { data, error } = await createClient()
@@ -78,7 +83,10 @@ export async function saveWorkspace(wid: string, revision: number, projects: Pro
   const used = new Set<string>();
   for (const p of doc) {
     if (p._logoPath) used.add(p._logoPath);
-    for (const page of p.pages) for (const f of frames(page)) if (f._imagePath) used.add(f._imagePath);
+    for (const page of p.pages) for (const f of frames(page)) {
+      if (f._imagePath) used.add(f._imagePath);
+      if (f._imagePath2) used.add(f._imagePath2);
+    }
   }
   pruneImages(wid, used).catch(() => {});
   return data as number;

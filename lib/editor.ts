@@ -6,10 +6,11 @@
  */
 import { toast } from "sonner";
 import { create } from "zustand";
-import { copy, frame as newFrame, frames, imageURL, page as newPage, placed, safeURL, uid, type Frame, type Highlight, type Page, type Project, type Step } from "@/lib/guide-core";
-import { frameData, optimizeImage, redact } from "@/lib/images";
+import { copy, frame as newFrame, frames, imageURL, isPair, page as newPage, pairLayout, placed, safeURL, uid, type Arrow, type Frame, type Highlight, type Page, type Project, type Step } from "@/lib/guide-core";
+import { imageRatio, optimizeImage, redact, slotData } from "@/lib/images";
 import { logActivity, logPageEdit } from "@/lib/activity";
 import { useWorkspace } from "@/lib/store";
+import { visible } from "@/lib/dom";
 
 /** Pairing token shared with the capture extension through localStorage (same key as the legacy app). */
 export function pairingToken() {
@@ -21,8 +22,8 @@ export function pairingToken() {
   return token;
 }
 
-export type Tool = "select" | "pin" | "highlight" | "redact";
-type Snapshot = Pick<Frame, "image" | "_imagePath" | "steps" | "highlights">;
+export type Tool = "select" | "pin" | "highlight" | "arrow" | "redact";
+type Snapshot = Pick<Frame, "image" | "_imagePath" | "image2" | "_imagePath2" | "steps" | "highlights" | "arrows">;
 
 type EditorState = {
   pid: string;
@@ -90,7 +91,7 @@ function editFrame(frameId: string, change: (f: Frame, page: Page) => void) {
 function remember(f: Frame) {
   const undo = [...useEditor.getState().undo, {
     id: f.id,
-    value: copy({ image: f.image, _imagePath: f._imagePath, steps: f.steps, highlights: f.highlights || [] }),
+    value: copy({ image: f.image, _imagePath: f._imagePath, image2: f.image2, _imagePath2: f._imagePath2, steps: f.steps, highlights: f.highlights || [], arrows: f.arrows }),
   }];
   useEditor.setState({ undo: undo.slice(-12) });
 }
@@ -106,8 +107,11 @@ export function applyUndo() {
   editFrame(frame.id, (f) => {
     f.image = value.image;
     if (value._imagePath) f._imagePath = value._imagePath; else delete f._imagePath;
+    if (value.image2) f.image2 = value.image2; else delete f.image2;
+    if (value._imagePath2) f._imagePath2 = value._imagePath2; else delete f._imagePath2;
     f.steps = value.steps;
     f.highlights = value.highlights;
+    if (value.arrows) f.arrows = value.arrows; else delete f.arrows;
   });
   toast.info("ย้อนการจัดจุดแล้ว");
 }
@@ -134,7 +138,7 @@ export function addPin(frameId: string, x: number, y: number) {
   });
   useEditor.setState({ selected: id });
   if (pending) toast.success(`วาง Point ${f.steps.indexOf(pending) + 1} แล้ว`);
-  else requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-step="${id}"][data-step-field="title"]`)?.focus({ preventScroll: true }));
+  else requestAnimationFrame(() => visible(`[data-step="${id}"][data-step-field="title"]`)?.focus({ preventScroll: true }));
   return id;
 }
 
@@ -214,10 +218,50 @@ export function setImageLabel(frameId: string, value: string) {
 export function jumpToFrame(id: string) {
   activateFrame(id);
   requestAnimationFrame(() => {
-    const section = document.getElementById("editor-image-" + id);
+    const section = visible(`#editor-image-${id}`);
     section?.focus({ preventScroll: true });
     section?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   });
+}
+
+/* ---------- arrows ---------- */
+
+export type ArrowPos = Omit<Arrow, "id">;
+
+export function addArrow(frameId: string, pos: ArrowPos) {
+  const { page } = current();
+  const f = page && findFrame(page, frameId);
+  if (!f) return;
+  if ((f.arrows || []).length >= 100) return void toast.error("หนึ่งภาพรองรับได้สูงสุด 100 ลูกศร");
+  remember(f);
+  const id = uid();
+  editFrame(frameId, (fr) => { (fr.arrows ||= []).push({ id, ...pos }); });
+  useEditor.setState({ selectedBox: id, selected: "", tool: "select" });
+}
+
+/** Move or reshape an arrow; every coordinate is clamped to the image. */
+export function setArrow(frameId: string, arrowId: string, pos: ArrowPos) {
+  const { page } = current();
+  const f = page && findFrame(page, frameId);
+  if (!f) return;
+  remember(f);
+  const c = (v: number) => Math.max(0, Math.min(1, v));
+  editFrame(frameId, (fr) => {
+    const a = fr.arrows?.find((a) => a.id === arrowId);
+    if (a) Object.assign(a, { x1: c(pos.x1), y1: c(pos.y1), x2: c(pos.x2), y2: c(pos.y2) });
+  });
+}
+
+export function deleteArrow(frameId: string, arrowId: string) {
+  const { page } = current();
+  const f = page && findFrame(page, frameId);
+  if (!f) return;
+  remember(f);
+  editFrame(frameId, (fr) => {
+    fr.arrows = (fr.arrows || []).filter((a) => a.id !== arrowId);
+    if (!fr.arrows.length) delete fr.arrows;
+  });
+  useEditor.setState({ selectedBox: "" });
 }
 
 /** Replace a frame's image. Steps keep their text but must be placed again; highlights are cleared. */
@@ -227,12 +271,13 @@ export async function replaceImage(frameId: string, data: string, confirmReplace
   const f = page && findFrame(page, frameId);
   if (!f) throw new Error("กรุณาเลือกเนื้อหาก่อนเพิ่มภาพ");
   data = await optimizeImage(data);
-  if (hasImage(f) && (f.steps.length || (f.highlights || []).length) && !(await confirmReplace())) return;
+  if (hasImage(f) && (f.steps.length || (f.highlights || []).length || f.arrows?.length) && !(await confirmReplace())) return;
   editFrame(frameId, (fr, pg) => {
     fr.image = data;
     delete fr._imagePath;
     fr.steps.forEach((s) => { s.x = null; s.y = null; });
     fr.highlights = [];
+    delete fr.arrows;
     if (source) pg.url = safeURL(source);
   });
   forget(frameId);
@@ -271,22 +316,118 @@ export function removeImage(frameId: string) {
       const next = (q.extraImages || []).shift();
       q.image = next?.image || "";
       if (next?._imagePath) q._imagePath = next._imagePath; else delete q._imagePath;
+      if (next?.image2) q.image2 = next.image2; else delete q.image2;
+      if (next?._imagePath2) q._imagePath2 = next._imagePath2; else delete q._imagePath2;
       q.steps = next?.steps || [];
       q.highlights = next?.highlights || [];
+      if (next?.arrows) q.arrows = next.arrows; else delete q.arrows;
       q.imageLabel = next?.imageLabel || "";
     } else q.extraImages = q.extraImages.filter((f) => f.id !== frameId);
   });
   useEditor.setState({ undo: [], activeFrame: "", selected: "" });
 }
 
+/** Paint a solid box into the image pixels. On a pair, each image gets the part of the box over it. */
 export async function redactArea(frameId: string, box: Omit<Highlight, "id">) {
   const { page } = current();
   const f = page && findFrame(page, frameId);
   if (!f) return;
-  const image = await redact(await frameData(f), box);
-  editFrame(frameId, (fr) => { fr.image = image; delete fr._imagePath; });
+  if (!isPair(f)) {
+    const image = await redact(await slotData(f, 1), box);
+    editFrame(frameId, (fr) => { fr.image = image; delete fr._imagePath; });
+  } else {
+    const { boxes } = pairLayout(await imageRatio(f.image, f._imagePath), await imageRatio(f.image2, f._imagePath2));
+    const out: { slot: 1 | 2; image: string }[] = [];
+    for (const [i, b] of boxes.entries()) {
+      const x0 = Math.max(box.x, b.x), y0 = Math.max(box.y, b.y);
+      const x1 = Math.min(box.x + box.width, b.x + b.w), y1 = Math.min(box.y + box.height, b.y + b.h);
+      if (x1 <= x0 || y1 <= y0) continue;
+      const slot = (i + 1) as 1 | 2;
+      out.push({ slot, image: await redact(await slotData(f, slot), { x: (x0 - b.x) / b.w, y: (y0 - b.y) / b.h, width: (x1 - x0) / b.w, height: (y1 - y0) / b.h }) });
+    }
+    if (!out.length) return void toast.info("กรอบที่ลากไม่ได้อยู่บนภาพ");
+    editFrame(frameId, (fr) => {
+      for (const o of out) {
+        if (o.slot === 1) { fr.image = o.image; delete fr._imagePath; }
+        else { fr.image2 = o.image; delete fr._imagePath2; }
+      }
+    });
+  }
   forget(frameId);
   toast.success("ปิดทับข้อมูลลงในภาพแล้ว");
+}
+
+/* ---------- second image (two columns) ---------- */
+
+type Point = { x: number; y: number };
+
+/** Move every annotation through `map`; pins that fall outside are unplaced, boxes and arrows dropped. */
+function remap(f: Frame, map: (p: Point) => Point | null) {
+  for (const s of f.steps) {
+    if (!placed(s)) continue;
+    const p = map({ x: s.x!, y: s.y! });
+    if (p) { s.x = Math.min(0.985, Math.max(0.015, p.x)); s.y = Math.min(0.985, Math.max(0.015, p.y)); }
+    else { s.x = null; s.y = null; }
+  }
+  f.highlights = (f.highlights || []).flatMap((h) => {
+    const a = map({ x: h.x, y: h.y }), b = map({ x: h.x + h.width, y: h.y + h.height });
+    return a && b ? [{ ...h, x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y }] : [];
+  });
+  if (f.arrows) {
+    f.arrows = f.arrows.flatMap((ar) => {
+      const a = map({ x: ar.x1, y: ar.y1 }), b = map({ x: ar.x2, y: ar.y2 });
+      return a && b ? [{ ...ar, x1: a.x, y1: a.y, x2: b.x, y2: b.y }] : [];
+    });
+    if (!f.arrows.length) delete f.arrows;
+  }
+}
+
+/** Frame coordinates of a single image → the left column of a pair. */
+const intoLeft = (r1: number, r2: number) => {
+  const { boxes: [left] } = pairLayout(r1, r2);
+  return (p: Point) => ({ x: left.x + p.x * left.w, y: left.y + p.y * left.h });
+};
+/** Pair coordinates → single image; only what sits over the left image survives. */
+const outOfLeft = (r1: number, r2: number) => {
+  const { boxes: [left] } = pairLayout(r1, r2);
+  return (p: Point) => {
+    const x = (p.x - left.x) / left.w, y = (p.y - left.y) / left.h;
+    return x >= -0.001 && x <= 1.001 && y >= -0.001 && y <= 1.001 ? { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) } : null;
+  };
+};
+
+/** Put a second image next to the frame's image (or replace it). Annotations on the left image stay in place. */
+export async function setSecondImage(frameId: string, data: string) {
+  if (!imageURL(data)) throw new Error("ข้อมูลภาพไม่ถูกต้อง");
+  const { page } = current();
+  const f = page && findFrame(page, frameId);
+  if (!f || !hasImage(f)) throw new Error("เพิ่มภาพแรกก่อน แล้วจึงเพิ่มภาพที่ 2");
+  data = await optimizeImage(data);
+  const r1 = await imageRatio(f.image, f._imagePath), r2 = await imageRatio(data);
+  const oldR2 = isPair(f) ? await imageRatio(f.image2, f._imagePath2) : null;
+  remember(f);
+  editFrame(frameId, (fr) => {
+    if (oldR2 !== null) remap(fr, outOfLeft(r1, oldR2));
+    remap(fr, intoLeft(r1, r2));
+    fr.image2 = data;
+    delete fr._imagePath2;
+  });
+  toast.success(oldR2 === null ? "วางภาพที่ 2 ไว้ด้านขวาแล้ว" : "เปลี่ยนภาพด้านขวาแล้ว");
+}
+
+/** Back to a single image. Annotations over the left image stay; the right image's are removed. */
+export async function removeSecondImage(frameId: string) {
+  const { page } = current();
+  const f = page && findFrame(page, frameId);
+  if (!f || !isPair(f)) return;
+  const map = outOfLeft(await imageRatio(f.image, f._imagePath), await imageRatio(f.image2, f._imagePath2));
+  remember(f);
+  editFrame(frameId, (fr) => {
+    remap(fr, map);
+    delete fr.image2;
+    delete fr._imagePath2;
+  });
+  toast.success("ลบภาพด้านขวาแล้ว");
 }
 
 /* ---------- pages ---------- */
@@ -317,7 +458,7 @@ export function duplicatePage(pid: string, pageId: string) {
     const clone = copy(p.pages[i]);
     clone.id = id;
     clone.title += " (สำเนา)";
-    const renew = (f: Frame) => { f.steps.forEach((s: Step) => (s.id = uid())); (f.highlights || []).forEach((h) => (h.id = uid())); };
+    const renew = (f: Frame) => { f.steps.forEach((s: Step) => (s.id = uid())); (f.highlights || []).forEach((h) => (h.id = uid())); (f.arrows || []).forEach((a) => (a.id = uid())); };
     renew(clone);
     (clone.extraImages || []).forEach((f) => { f.id = uid(); renew(f); });
     p.pages.splice(i + 1, 0, clone);

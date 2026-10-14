@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   appendImages, applyUndo, current, deletePage, duplicatePage, editPage, imageLabel, jumpToFrame, movePage,
-  openPage, pairingToken, replaceImage, setImageLabel, useEditor,
+  openPage, pairingToken, replaceImage, setImageLabel, setSecondImage, useEditor,
 } from "@/lib/editor";
 import { frames, imageURL, safeURL, type Page } from "@/lib/guide-core";
 import { CaptureCancelled, captureScreen, decodeImage, imageFromFile } from "@/lib/images";
@@ -38,13 +38,14 @@ export function Editor() {
   const page = project?.pages.find((q) => q.id === pageId) ?? project?.pages[0];
   const loadId = useWorkspace((s) => s.loadId);
   const fileInput = useRef<HTMLInputElement>(null);
-  const uploadTarget = useRef<{ frameId: string | null }>({ frameId: null });
+  const uploadTarget = useRef<{ frameId: string | null; slot?: 1 | 2 }>({ frameId: null });
 
   useEffect(() => { openPage(pid, pageId); }, [pid, pageId]);
 
   // Keyboard shortcuts, paste and extension captures (legacy document listeners).
   useEffect(() => {
-    const busy = () => !!document.querySelector("[role=dialog],[role=alertdialog]");
+    // Only dialogs that are open now: closed Radix dialogs (and hidden routes kept by Next.js) stay in the DOM.
+    const busy = () => !!document.querySelector('[role=dialog][data-state=open],[role=alertdialog][data-state=open]');
     function onKey(ev: KeyboardEvent) {
       if (ev.key === "Escape") useEditor.setState({ tool: "select", selectedBox: "" });
       const t = ev.target as HTMLElement;
@@ -52,6 +53,7 @@ export function Editor() {
       const k = ev.key.toLowerCase();
       if (k === "n" && !ev.ctrlKey && !ev.metaKey) useEditor.setState({ tool: "pin" });
       if (k === "v" && !ev.ctrlKey && !ev.metaKey) useEditor.setState({ tool: "select" });
+      if (k === "a" && !ev.ctrlKey && !ev.metaKey) useEditor.setState({ tool: "arrow" });
       if (k === "z" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); applyUndo(); }
     }
     async function onPaste(ev: ClipboardEvent) {
@@ -109,14 +111,17 @@ export function Editor() {
   }
 
   const source: ImageSource = {
-    upload(frameId) {
-      uploadTarget.current = { frameId };
+    upload(frameId, slot = 1) {
+      uploadTarget.current = { frameId, slot };
       fileInput.current!.multiple = false;
       fileInput.current!.click();
     },
-    async capture(frameId) {
-      try { await replaceImage(frameId, await captureScreen(), confirmReplace); }
-      catch (e) { if (e instanceof CaptureCancelled) toast.info(e.message); else toast.error((e as Error).message); }
+    async capture(frameId, slot = 1) {
+      try {
+        const data = await captureScreen();
+        if (slot === 2) await setSecondImage(frameId, data);
+        else await replaceImage(frameId, data, confirmReplace);
+      } catch (e) { if (e instanceof CaptureCancelled) toast.info(e.message); else toast.error((e as Error).message); }
     },
   };
   const addImages = {
@@ -133,9 +138,10 @@ export function Editor() {
 
   async function onFiles(ev: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(ev.target.files ?? []);
-    const { frameId } = uploadTarget.current;
+    const { frameId, slot } = uploadTarget.current;
     try {
       if (!files.length) return;
+      if (frameId && slot === 2) return void await setSecondImage(frameId, await imageFromFile(files[0]));
       if (frameId) return void await replaceImage(frameId, await imageFromFile(files[0]), confirmReplace);
       const data: string[] = [];
       for (const file of files) data.push(await imageFromFile(file));

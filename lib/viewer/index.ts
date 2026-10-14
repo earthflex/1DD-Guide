@@ -19,7 +19,10 @@ export async function makeHTML(project: Project) {
   const p = copy(project);
   if (!logoURL(p.logo)) p.logo = "";
   // The runtime puts image sources into HTML unescaped, so only strict base64 data URLs may pass.
-  for (const q of p.pages) for (const f of frames(q)) if (!imageURL(f.image)) f.image = "";
+  for (const q of p.pages) for (const f of frames(q)) {
+    if (!imageURL(f.image)) f.image = "";
+    if (f.image2 !== undefined && !imageURL(f.image2)) delete f.image2;
+  }
   p.logoText = typeof p.logoText === "string" ? p.logoText.slice(0, 120) : "";
   // Escape '<' as well as Unicode line separators to prevent closing script tags.
   const data = JSON.stringify(p).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
@@ -41,7 +44,9 @@ export async function resolveImages(projects: Project[]): Promise<Project[]> {
     delete p._logoPath;
     for (const q of p.pages) for (const f of frames(q)) {
       if (f._imagePath && !f.image) jobs.push(get(f._imagePath).then((d) => { f.image = d; }));
+      if (f._imagePath2 && !f.image2) jobs.push(get(f._imagePath2).then((d) => { f.image2 = d; }));
       delete f._imagePath;
+      delete f._imagePath2;
     }
   }
   await Promise.all(jobs);

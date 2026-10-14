@@ -81,7 +81,7 @@ export async function deleteUnusedMedia(wid: string, paths: string[]): Promise<{
   const walk = (v: unknown): void => {
     if (Array.isArray(v)) v.forEach(walk);
     else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) {
-      if ((k === "_imagePath" || k === "_logoPath") && typeof x === "string") used.add(x);
+      if ((k === "_imagePath" || k === "_imagePath2" || k === "_logoPath") && typeof x === "string") used.add(x);
       else walk(x);
     }
   };

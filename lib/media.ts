@@ -69,9 +69,11 @@ export function mediaUsage(projects: Project[]) {
   for (const p of projects) {
     add(p._logoPath, { pid: p.id, projectName: p.name, pageId: p.pages[0]?.id ?? "new", pageTitle: "", label: "โลโก้", kind: "logo" });
     for (const q of p.pages) {
-      frames(q).forEach((f, n) => add(f._imagePath, {
-        pid: p.id, projectName: p.name, pageId: q.id, pageTitle: q.title, label: f.imageLabel || "ภาพ " + (n + 1), kind: "image",
-      }));
+      frames(q).forEach((f, n) => {
+        const label = f.imageLabel || "ภาพ " + (n + 1);
+        add(f._imagePath, { pid: p.id, projectName: p.name, pageId: q.id, pageTitle: q.title, label: f._imagePath2 ? label + " (ซ้าย)" : label, kind: "image" });
+        add(f._imagePath2, { pid: p.id, projectName: p.name, pageId: q.id, pageTitle: q.title, label: label + " (ขวา)", kind: "image" });
+      });
     }
   }
   return map;

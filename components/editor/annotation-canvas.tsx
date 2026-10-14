@@ -5,15 +5,19 @@ import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm";
 import { GuideImage } from "@/components/guide-image";
 import {
-  activateFrame, addHighlight, addPin, deleteHighlight, moveBox, movePin, redactArea, useEditor, type Tool,
+  activateFrame, addArrow, addHighlight, addPin, deleteArrow, deleteHighlight, moveBox, movePin, redactArea, setArrow, useEditor,
+  type ArrowPos, type Tool,
 } from "@/lib/editor";
-import { placed, type Frame } from "@/lib/guide-core";
+import { isPair, placed, type Arrow, type Frame } from "@/lib/guide-core";
 import { cn } from "@/lib/utils";
+import { visible } from "@/lib/dom";
 
 type Point = { x: number; y: number };
 type Drag =
   | { kind: "pin" | "box"; id: string; start: Point; original: Point; moved: boolean }
-  | { kind: "highlight" | "redact"; start: Point };
+  | { kind: "highlight" | "redact" | "arrow"; start: Point }
+  /** Move a whole arrow ("both") or drag one end to stretch, shrink or turn it. */
+  | { kind: "arrowEdit"; id: string; part: "both" | "head" | "tail"; start: Point; original: ArrowPos; moved: boolean };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
@@ -26,6 +30,8 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
   // Live position while dragging; committed to the document on pointerup.
   const [moving, setMoving] = useState<{ id: string; x: number; y: number } | null>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [arrowLive, setArrowLive] = useState<{ id: string; pos: ArrowPos } | null>(null);
+  const arrows = frame.arrows ?? [];
 
   const coords = (ev: React.PointerEvent): Point => {
     const r = ref.current!.getBoundingClientRect();
@@ -38,7 +44,15 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     const pos = coords(ev), target = ev.target as HTMLElement;
     const pin = target.closest<HTMLElement>("[data-pin]");
     const box = target.closest<HTMLElement>("[data-highlight]");
-    if (pin) {
+    const handle = target.closest<Element>("[data-arrow-handle]");
+    const arrowEl = target.closest<Element>("[data-arrow]");
+    if (handle || (mode === "select" && arrowEl)) {
+      const id = (handle ?? arrowEl)!.getAttribute(handle ? "data-arrow-id" : "data-arrow")!;
+      const a = arrows.find((a) => a.id === id)!;
+      useEditor.setState({ selectedBox: id, selected: "" });
+      const part = (handle?.getAttribute("data-arrow-handle") ?? "both") as "both" | "head" | "tail";
+      drag.current = { kind: "arrowEdit", id, part, start: pos, original: { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2 }, moved: false };
+    } else if (pin) {
       const s = frame.steps.find((s) => s.id === pin.dataset.pin)!;
       useEditor.setState({ selected: s.id });
       drag.current = { kind: "pin", id: s.id, start: pos, original: { x: s.x!, y: s.y! }, moved: false };
@@ -46,7 +60,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
       const h = frame.highlights.find((h) => h.id === box.dataset.highlight)!;
       useEditor.setState({ selectedBox: h.id, selected: "" });
       drag.current = { kind: "box", id: h.id, start: pos, original: { x: h.x, y: h.y }, moved: false };
-    } else if (mode === "redact" || mode === "highlight") {
+    } else if (mode === "redact" || mode === "highlight" || mode === "arrow") {
       drag.current = { kind: mode, start: pos };
     } else return;
     ref.current!.setPointerCapture(ev.pointerId);
@@ -57,6 +71,24 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     const d = drag.current;
     if (!d) return;
     const pos = coords(ev);
+    if (d.kind === "arrowEdit") {
+      if (Math.abs(pos.x - d.start.x) + Math.abs(pos.y - d.start.y) > 0.004) d.moved = true;
+      if (!d.moved) return;
+      const o = d.original;
+      if (d.part === "head") setArrowLive({ id: d.id, pos: { ...o, x2: pos.x, y2: pos.y } });
+      else if (d.part === "tail") setArrowLive({ id: d.id, pos: { ...o, x1: pos.x, y1: pos.y } });
+      else {
+        // Keep the whole arrow inside the image while moving it.
+        const dx = Math.max(-Math.min(o.x1, o.x2), Math.min(1 - Math.max(o.x1, o.x2), pos.x - d.start.x));
+        const dy = Math.max(-Math.min(o.y1, o.y2), Math.min(1 - Math.max(o.y1, o.y2), pos.y - d.start.y));
+        setArrowLive({ id: d.id, pos: { x1: o.x1 + dx, y1: o.y1 + dy, x2: o.x2 + dx, y2: o.y2 + dy } });
+      }
+      return;
+    }
+    if (d.kind === "arrow") {
+      setArrowLive({ id: "", pos: { x1: d.start.x, y1: d.start.y, x2: pos.x, y2: pos.y } });
+      return;
+    }
     if (d.kind === "pin" || d.kind === "box") {
       if (Math.abs(pos.x - d.start.x) + Math.abs(pos.y - d.start.y) > 0.004) d.moved = true;
       if (!d.moved) return;
@@ -83,15 +115,29 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     }
     drag.current = null;
     if (ref.current?.hasPointerCapture(ev.pointerId)) ref.current.releasePointerCapture(ev.pointerId);
-    const live = moving;
+    const live = moving, liveArrow = arrowLive;
     setMoving(null);
     setDraft(null);
+    setArrowLive(null);
+    if (d.kind === "arrowEdit") {
+      if (d.moved && liveArrow) {
+        const p = liveArrow.pos;
+        if (Math.hypot(p.x2 - p.x1, p.y2 - p.y1) < 0.02) toast.info("ลูกศรสั้นเกินไป ลากให้ยาวขึ้นอีกนิด");
+        else setArrow(frame.id, d.id, p);
+      }
+      return;
+    }
+    if (d.kind === "arrow") {
+      const end = coords(ev);
+      if (Math.hypot(end.x - d.start.x, end.y - d.start.y) < 0.02) return;
+      return addArrow(frame.id, { x1: d.start.x, y1: d.start.y, x2: end.x, y2: end.y });
+    }
     if (d.kind === "pin") {
       if (d.moved && live) movePin(frame.id, d.id, live);
-      else document.querySelector(`[data-step-card="${d.id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      else visible(`[data-step-card="${d.id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } else if (d.kind === "box") {
       if (d.moved && live) moveBox(frame.id, d.id, live);
-      requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-highlight="${d.id}"]`)?.focus({ preventScroll: true }));
+      requestAnimationFrame(() => visible(`[data-highlight="${d.id}"]`)?.focus({ preventScroll: true }));
     } else {
       const end = coords(ev);
       if (Math.abs(end.x - d.start.x) < 0.005 || Math.abs(end.y - d.start.y) < 0.005) return;
@@ -115,6 +161,19 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     const step = ev.shiftKey ? 0.02 : 0.005;
     const dx = ({ ArrowLeft: -step, ArrowRight: step } as Record<string, number>)[ev.key] ?? 0;
     const dy = ({ ArrowUp: -step, ArrowDown: step } as Record<string, number>)[ev.key] ?? 0;
+    const arrowEl = target.closest<Element>("[data-arrow]");
+    if (arrowEl) {
+      const a = arrows.find((a) => a.id === arrowEl.getAttribute("data-arrow"));
+      if (!a) return;
+      if (ev.key === "Delete" || ev.key === "Backspace") {
+        ev.preventDefault();
+        deleteArrow(frame.id, a.id);
+      } else if (arrow) {
+        ev.preventDefault();
+        setArrow(frame.id, a.id, { x1: a.x1 + dx, y1: a.y1 + dy, x2: a.x2 + dx, y2: a.y2 + dy });
+      }
+      return;
+    }
     const boxEl = target.closest<HTMLElement>("[data-highlight]");
     if (boxEl) {
       const h = frame.highlights.find((h) => h.id === boxEl.dataset.highlight);
@@ -139,7 +198,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
       useEditor.setState({ selected: s.id });
-      document.querySelector<HTMLElement>(`[data-step="${s.id}"][data-step-field="title"]`)?.focus();
+      visible(`[data-step="${s.id}"][data-step-field="title"]`)?.focus();
     }
   }
 
@@ -150,7 +209,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
       data-tool={mode}
       className={cn(
         "relative w-full touch-pan-y bg-white leading-none shadow-sm select-none",
-        (mode === "pin" || mode === "redact" || mode === "highlight") && "cursor-crosshair touch-none",
+        (mode === "pin" || mode === "redact" || mode === "highlight" || mode === "arrow") && "cursor-crosshair touch-none",
       )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -158,7 +217,15 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
       onPointerCancel={onPointerCancel}
       onKeyDown={onKeyDown}
     >
-      <GuideImage frame={frame} alt={alt} className="pointer-events-none block h-auto w-full" />
+      {isPair(frame) ? (
+        // Same geometry as pairLayout(): two equal columns, 2% gap, top-aligned.
+        <div className="pointer-events-none grid grid-cols-2 items-start gap-x-[2%]">
+          <GuideImage frame={frame} alt={`${alt} (ซ้าย)`} className="block h-auto w-full" />
+          <GuideImage frame={{ image: frame.image2 ?? "", _imagePath: frame._imagePath2 }} alt={`${alt} (ขวา)`} className="block h-auto w-full" />
+        </div>
+      ) : (
+        <GuideImage frame={frame} alt={alt} className="pointer-events-none block h-auto w-full" />
+      )}
       {frame.highlights.map((h, n) => {
         const pos = moving?.id === h.id ? moving : h;
         return (
@@ -177,6 +244,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
           />
         );
       })}
+      <ArrowLayer frameId={frame.id} arrows={arrows} live={arrowLive} mode={mode} selectedId={selectedBox} />
       {frame.steps.map((s, n) => {
         if (!placed(s)) return null;
         const pos = moving?.id === s.id ? moving : (s as { x: number; y: number });
@@ -203,5 +271,65 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Arrows as SVG over the screenshot. Coordinates are percentages, so arrows follow the image size.
+ * In select mode the (invisible, wide) hit line moves an arrow; the end handles stretch or turn it.
+ */
+function ArrowLayer({ frameId, arrows, live, mode, selectedId }: {
+  frameId: string; arrows: Arrow[]; live: { id: string; pos: ArrowPos } | null; mode: Tool; selectedId: string;
+}) {
+  const marker = `arrowhead-${frameId}`;
+  const shown: Arrow[] = arrows.map((a) => (live && live.id === a.id ? { ...a, ...live.pos } : a));
+  if (live && !live.id) shown.push({ id: "draft", ...live.pos });
+  if (!shown.length) return null;
+  const pct = (v: number) => `${v * 100}%`;
+  const selected = shown.find((a) => a.id === selectedId && a.id !== "draft");
+  return (
+    <>
+      <svg className="pointer-events-none absolute inset-0 z-[1] size-full overflow-visible" aria-hidden="false">
+        <defs>
+          <marker id={marker} viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+            <path d="M0 0L10 5L0 10z" fill="var(--brand)" />
+          </marker>
+        </defs>
+        {shown.map((a, n) => (
+          <g key={a.id}>
+            <line x1={pct(a.x1)} y1={pct(a.y1)} x2={pct(a.x2)} y2={pct(a.y2)} stroke="var(--brand)" strokeWidth={4}
+              strokeLinecap="round" markerEnd={`url(#${marker})`} opacity={a.id === "draft" ? 0.7 : 1} />
+            {a.id !== "draft" && (
+              <line
+                data-arrow={a.id}
+                tabIndex={mode === "select" ? 0 : -1}
+                role="button"
+                aria-label={`ลูกศร ${n + 1}`}
+                x1={pct(a.x1)} y1={pct(a.y1)} x2={pct(a.x2)} y2={pct(a.y2)}
+                stroke="transparent" strokeWidth={16} strokeLinecap="round"
+                className={cn("outline-none", mode === "select" ? "pointer-events-auto cursor-move" : "pointer-events-none")}
+              >
+                <title>ลากเพื่อย้าย · ลากปลายเพื่อยืดหรือหมุน · Delete เพื่อลบ</title>
+              </line>
+            )}
+            {a.id === selected?.id && (
+              <line x1={pct(a.x1)} y1={pct(a.y1)} x2={pct(a.x2)} y2={pct(a.y2)} stroke="var(--brand)" strokeOpacity={0.25}
+                strokeWidth={12} strokeLinecap="round" />
+            )}
+          </g>
+        ))}
+      </svg>
+      {selected && (["tail", "head"] as const).map((part) => (
+        <button
+          key={part}
+          type="button"
+          data-arrow-handle={part}
+          data-arrow-id={selected.id}
+          aria-label={part === "head" ? "ลากหัวลูกศร" : "ลากท้ายลูกศร"}
+          className="absolute z-[3] size-3.5 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none rounded-full border-2 border-brand bg-white p-0 shadow active:cursor-grabbing"
+          style={{ left: pct(part === "head" ? selected.x2 : selected.x1), top: pct(part === "head" ? selected.y2 : selected.y1) }}
+        />
+      ))}
+    </>
   );
 }
