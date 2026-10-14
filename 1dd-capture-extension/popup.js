@@ -30,7 +30,7 @@ el('capture').addEventListener('click',async()=>{
     const image=await chrome.tabs.captureVisibleTab(source.windowId,{format:'png'});
     const result=await chrome.scripting.executeScript({target:{tabId:target.id},func:(data)=>{
       if(!document.querySelector('[data-field="title"]'))return 'กรุณาเปิดเนื้อหาปลายทางใน Guide ก่อน';
-      if(document.querySelector('dialog[open],[role="dialog"],[role="alertdialog"]'))return 'ปิดหน้าต่างใน Guide แล้วจับภาพอีกครั้ง';
+      if(document.querySelector('dialog[open],[role="dialog"][data-state="open"],[role="alertdialog"][data-state="open"]'))return 'ปิดหน้าต่างใน Guide แล้วจับภาพอีกครั้ง';
       if(localStorage.getItem('1dd-capture-token')!==data.token)return 'รหัสเชื่อมต่อไม่ตรง คัดลอกรหัสจาก Guide ใหม่';
       window.postMessage(data,location.origin);return 'ok';
     },args:[{type:'1DD_CAPTURE',token:conf.token,image,url:source.url}]});
