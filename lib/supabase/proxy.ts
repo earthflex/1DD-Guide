@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_KEY, SUPABASE_URL } from "./env";
 
 /** Paths reachable without a session. */
-const PUBLIC_PATHS = ["/login", "/auth", "/g"];
+const PUBLIC_PATHS = ["/login", "/auth", "/g", "/api/keep-alive"];
 const isPublic = (path: string) => PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "/"));
 
 /** Refreshes the auth cookies on every request and sends logged-out users to /login. */
