@@ -91,7 +91,7 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
                     <Undo2 />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>ย้อนการจัดจุด (Ctrl / ⌘ + Z)</TooltipContent>
+                <TooltipContent>ย้อนการจัดจุด (Ctrl / Cmd + Z)</TooltipContent>
               </Tooltip>
             </div>
             <div className="flex items-center gap-1">
@@ -134,7 +134,7 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
               <div className="grid place-items-center gap-3 px-6 py-16 text-center">
                 <ImageIcon className="size-8 text-muted-foreground" />
                 <h3 className="font-medium">เริ่มต้นด้วยภาพหน้าจอ</h3>
-                <p className="text-sm text-muted-foreground">เปิดหลังบ้านที่ล็อกอินไว้ แล้วจับภาพแท็บนั้น<br />หรือวางภาพด้วย Ctrl / ⌘ + V</p>
+                <p className="text-sm text-muted-foreground">เปิดหลังบ้านที่ล็อกอินไว้ แล้วจับภาพแท็บนั้น<br />หรือวางภาพด้วย Ctrl / Cmd + V</p>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={() => source.upload(f.id)}><Upload />อัปโหลดภาพ</Button>
                   <Button onClick={() => source.capture(f.id)}><Camera />จับภาพหน้าจอ</Button>

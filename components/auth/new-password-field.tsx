@@ -29,7 +29,7 @@ export function NewPasswordField({ id, name, label = "รหัสผ่าน",
   }
   async function copy() {
     try { await navigator.clipboard.writeText(value); toast.success("คัดลอกรหัสผ่านแล้ว"); }
-    catch { toast.info("คัดลอกไม่ได้ กรุณาเลือกข้อความแล้วกด Ctrl / ⌘ + C"); }
+    catch { toast.info("คัดลอกไม่ได้ กรุณาเลือกข้อความแล้วกด Ctrl / Cmd + C"); }
   }
 
   return (

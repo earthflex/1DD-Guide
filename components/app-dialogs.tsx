@@ -79,7 +79,7 @@ function ExportChoices({ pid }: { pid: string }) {
       </DialogHeader>
       <div className="grid gap-2">
         <Choice icon={<BookOpen />} title="HTML สำหรับลูกค้า" text="ไฟล์เดียว รวมภาพและคำอธิบาย เปิดอ่านได้ทันที หรือนำไปวางบนโฮสต์เพื่อส่งเป็นลิงก์" onClick={() => { closeDialog(); void downloadHTML(pid); }} />
-        <Choice icon={<FileText />} title="พิมพ์ / บันทึกเป็น PDF" text="A4 แนวนอน พร้อมหน้าปกและโลโก้ลูกค้า · เลือก “ดาวน์โหลด PDF” → Save as PDF" onClick={() => openPreview(pid)} />
+        <Choice icon={<FileText />} title="พิมพ์ / บันทึกเป็น PDF" text="A4 แนวนอน พร้อมหน้าปกและโลโก้ลูกค้า · เลือก “ดาวน์โหลด PDF” แล้วเลือก Save as PDF" onClick={() => openPreview(pid)} />
         <Choice icon={<Download />} title="ไฟล์สำรองสำหรับแก้ไขต่อ (.json)" text="เก็บภาพ ข้อความ และตำแหน่งหมายเลข นำเข้าใหม่ได้โดยไม่ทับโปรเจกต์เดิม" onClick={() => { closeDialog(); void exportJSON([p]); }} />
         <Choice icon={<Globe />} title="เผยแพร่ลิงก์คู่มือบนคลาวด์" text="สร้างลิงก์อ่านอย่างเดียว สำหรับผู้ที่ได้รับลิงก์" onClick={() => openDialog({ kind: "publish", pid })} />
       </div>
@@ -106,7 +106,7 @@ function PublishPanel({ pid }: { pid: string }) {
   }
   async function copyLink() {
     try { await navigator.clipboard.writeText(url!); toast.success("คัดลอกลิงก์แล้ว"); }
-    catch { (document.getElementById("share-link") as HTMLInputElement)?.select(); toast.info("เลือกลิงก์แล้ว กด Ctrl / ⌘ + C เพื่อคัดลอก"); }
+    catch { (document.getElementById("share-link") as HTMLInputElement)?.select(); toast.info("เลือกลิงก์แล้ว กด Ctrl / Cmd + C เพื่อคัดลอก"); }
   }
   async function revoke() {
     if (!(await confirmDialog("เพิกถอนลิงก์คู่มือ", "ลิงก์เดิมจะเปิดอ่านไม่ได้อีก แต่ไฟล์ที่ดาวน์โหลดไปแล้วจะยังคงอยู่", "เพิกถอนลิงก์", true))) return;
@@ -366,7 +366,7 @@ function HelpPanel() {
         งานจะบันทึกลง Workspace ของทีมอัตโนมัติ ตรวจสถานะมุมขวาบนก่อนปิดหน้า<br />
         ไฟล์ HTML ที่ส่งออกไม่มีหน้าจอแก้ไขหรือข้อมูลโปรเจกต์อื่น
       </div>
-      <p className="text-xs text-muted-foreground">ปุ่มลัด: N ปักหมายเลข · A ลูกศร · V เลือก · Esc ยกเลิกเครื่องมือ · Ctrl / ⌘ + Z ย้อนกลับ · Ctrl / ⌘ + V วางภาพ</p>
+      <p className="text-xs text-muted-foreground">ปุ่มลัด: N ปักหมายเลข · A ลูกศร · V เลือก · Esc ยกเลิกเครื่องมือ · Ctrl / Cmd + Z ย้อนกลับ · Ctrl / Cmd + V วางภาพ</p>
     </div>
   );
 }
@@ -377,7 +377,7 @@ function ExtensionPanel() {
     <div className="grid gap-4">
       <DialogHeader><DialogTitle>จับภาพด้วยส่วนขยาย Chrome</DialogTitle></DialogHeader>
       <div><Button asChild><a href="/1dd-capture-extension.zip" download><Download />ดาวน์โหลดส่วนขยาย (.zip)</a></Button></div>
-      <p className="text-sm">แตกไฟล์ zip แล้วติดตั้งโฟลเดอร์ <strong>1dd-capture-extension</strong> ผ่าน <code className="rounded bg-muted px-1">chrome://extensions</code> → เปิด Developer mode → Load unpacked</p>
+      <p className="text-sm">แตกไฟล์ zip แล้วติดตั้งโฟลเดอร์ <strong>1dd-capture-extension</strong> ผ่าน <code className="rounded bg-muted px-1">chrome://extensions</code> เปิด Developer mode แล้วกด Load unpacked</p>
       <ol className="grid list-decimal gap-1 pl-5 text-sm">
         <li>ใส่ URL และรหัสเชื่อมต่อด้านล่างในส่วนขยาย</li>
         <li>เปิดเนื้อหาปลายทางไว้ใน Guide</li>
