@@ -5,16 +5,37 @@ import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm";
 import { GuideImage } from "@/components/guide-image";
 import {
-  activateFrame, addArrow, addHighlight, addPin, deleteArrow, deleteHighlight, moveBox, movePin, redactArea, setArrow, useEditor,
+  activateFrame, addArrow, addHighlight, addPin, deleteArrow, deleteHighlight, moveBox, movePin, redactArea, resizeBox, setArrow, useEditor,
   type ArrowPos, type Tool,
 } from "@/lib/editor";
-import { isPair, placed, type Arrow, type Frame } from "@/lib/guide-core";
+import { isPair, placed, type Arrow, type Frame, type Highlight } from "@/lib/guide-core";
 import { cn } from "@/lib/utils";
 import { visible } from "@/lib/dom";
 
 type Point = { x: number; y: number };
+type Rect = Omit<Highlight, "id">;
+/** Resize handles of a selected highlight: corners and edge midpoints, named by compass direction. */
+type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+const HANDLES: { part: Handle; x: number; y: number; cursor: string }[] = [
+  { part: "nw", x: 0, y: 0, cursor: "cursor-nwse-resize" }, { part: "n", x: 0.5, y: 0, cursor: "cursor-ns-resize" },
+  { part: "ne", x: 1, y: 0, cursor: "cursor-nesw-resize" }, { part: "e", x: 1, y: 0.5, cursor: "cursor-ew-resize" },
+  { part: "se", x: 1, y: 1, cursor: "cursor-nwse-resize" }, { part: "s", x: 0.5, y: 1, cursor: "cursor-ns-resize" },
+  { part: "sw", x: 0, y: 1, cursor: "cursor-nesw-resize" }, { part: "w", x: 0, y: 0.5, cursor: "cursor-ew-resize" },
+];
+const MIN_BOX = 0.01;
+
+/** The box after dragging `part` to `pos`: only the dragged edges move, and never past the opposite edge. */
+function resized(o: Rect, part: Handle, pos: Point): Rect {
+  let left = o.x, top = o.y, right = o.x + o.width, bottom = o.y + o.height;
+  if (part.includes("w")) left = Math.min(pos.x, right - MIN_BOX);
+  if (part.includes("e")) right = Math.max(pos.x, left + MIN_BOX);
+  if (part.includes("n")) top = Math.min(pos.y, bottom - MIN_BOX);
+  if (part.includes("s")) bottom = Math.max(pos.y, top + MIN_BOX);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 type Drag =
   | { kind: "pin" | "box"; id: string; start: Point; original: Point; moved: boolean }
+  | { kind: "boxResize"; id: string; part: Handle; original: Rect }
   | { kind: "highlight" | "redact" | "arrow"; start: Point }
   /** Move a whole arrow ("both") or drag one end to stretch, shrink or turn it. */
   | { kind: "arrowEdit"; id: string; part: "both" | "head" | "tail"; start: Point; original: ArrowPos; moved: boolean };
@@ -30,6 +51,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
   // Live position while dragging; committed to the document on pointerup.
   const [moving, setMoving] = useState<{ id: string; x: number; y: number } | null>(null);
   const [draft, setDraft] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [sizing, setSizing] = useState<{ id: string; rect: Rect } | null>(null);
   const [arrowLive, setArrowLive] = useState<{ id: string; pos: ArrowPos } | null>(null);
   const arrows = frame.arrows ?? [];
 
@@ -46,7 +68,11 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     const box = target.closest<HTMLElement>("[data-highlight]");
     const handle = target.closest<Element>("[data-arrow-handle]");
     const arrowEl = target.closest<Element>("[data-arrow]");
-    if (handle || (mode === "select" && arrowEl)) {
+    const boxHandle = target.closest<HTMLElement>("[data-box-handle]");
+    if (boxHandle) {
+      const h = frame.highlights.find((h) => h.id === boxHandle.dataset.boxId)!;
+      drag.current = { kind: "boxResize", id: h.id, part: boxHandle.dataset.boxHandle as Handle, original: { x: h.x, y: h.y, width: h.width, height: h.height } };
+    } else if (handle || (mode === "select" && arrowEl)) {
       const id = (handle ?? arrowEl)!.getAttribute(handle ? "data-arrow-id" : "data-arrow")!;
       const a = arrows.find((a) => a.id === id)!;
       useEditor.setState({ selectedBox: id, selected: "" });
@@ -71,6 +97,10 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     const d = drag.current;
     if (!d) return;
     const pos = coords(ev);
+    if (d.kind === "boxResize") {
+      setSizing({ id: d.id, rect: resized(d.original, d.part, pos) });
+      return;
+    }
     if (d.kind === "arrowEdit") {
       if (Math.abs(pos.x - d.start.x) + Math.abs(pos.y - d.start.y) > 0.004) d.moved = true;
       if (!d.moved) return;
@@ -115,10 +145,16 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     }
     drag.current = null;
     if (ref.current?.hasPointerCapture(ev.pointerId)) ref.current.releasePointerCapture(ev.pointerId);
-    const live = moving, liveArrow = arrowLive;
+    const live = moving, liveArrow = arrowLive, liveSize = sizing;
     setMoving(null);
     setDraft(null);
     setArrowLive(null);
+    setSizing(null);
+    if (d.kind === "boxResize") {
+      if (liveSize) resizeBox(frame.id, d.id, liveSize.rect);
+      requestAnimationFrame(() => visible(`[data-highlight="${d.id}"]`)?.focus({ preventScroll: true }));
+      return;
+    }
     if (d.kind === "arrowEdit") {
       if (d.moved && liveArrow) {
         const p = liveArrow.pos;
@@ -152,6 +188,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     drag.current = null;
     setMoving(null);
     setDraft(null);
+    setSizing(null);
   }
 
   function onKeyDown(ev: React.KeyboardEvent) {
@@ -181,6 +218,10 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
       if (ev.key === "Delete" || ev.key === "Backspace") {
         ev.preventDefault();
         deleteHighlight(frame.id, h.id);
+      } else if (arrow && ev.altKey) {
+        // Alt + arrows resize from the bottom-right corner.
+        ev.preventDefault();
+        resizeBox(frame.id, h.id, { x: h.x, y: h.y, width: h.width + dx, height: h.height + dy });
       } else if (arrow) {
         ev.preventDefault();
         moveBox(frame.id, h.id, { x: h.x + dx, y: h.y + dy });
@@ -227,21 +268,33 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
         <GuideImage frame={frame} alt={alt} className="pointer-events-none block h-auto w-full" />
       )}
       {frame.highlights.map((h, n) => {
-        const pos = moving?.id === h.id ? moving : h;
+        const rect = sizing?.id === h.id ? sizing.rect : { ...h, ...(moving?.id === h.id ? moving : {}) };
+        const handles = mode === "select" && h.id === selectedBox && !(moving?.id === h.id);
         return (
+          <div key={h.id} className="contents">
           <button
-            key={h.id}
             type="button"
             data-highlight={h.id}
             aria-label={`กรอบไฮไลท์ ${n + 1}`}
-            title="ลากเพื่อย้าย · Delete เพื่อลบ"
+            title="ลากเพื่อย้าย · ลากจุดที่ขอบเพื่อปรับขนาด · Alt + ลูกศรเพื่อปรับขนาด · Delete เพื่อลบ"
             className={cn(
               "absolute z-[1] cursor-move touch-none rounded-[2px] border-2 border-brand bg-transparent p-0 outline-none",
               mode !== "select" && "pointer-events-none",
               h.id === selectedBox && "ring-2 ring-brand/30 ring-offset-1",
             )}
-            style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%`, width: `${h.width * 100}%`, height: `${h.height * 100}%` }}
+            style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }}
           />
+          {handles && HANDLES.map(({ part, x, y, cursor }) => (
+            <span
+              key={part}
+              data-box-handle={part}
+              data-box-id={h.id}
+              aria-hidden
+              className={cn("absolute z-[3] size-2.5 -translate-x-1/2 -translate-y-1/2 touch-none rounded-[2px] border-2 border-brand bg-white shadow", cursor)}
+              style={{ left: `${(rect.x + rect.width * x) * 100}%`, top: `${(rect.y + rect.height * y) * 100}%` }}
+            />
+          ))}
+          </div>
         );
       })}
       <ArrowLayer frameId={frame.id} arrows={arrows} live={arrowLive} mode={mode} selectedId={selectedBox} />

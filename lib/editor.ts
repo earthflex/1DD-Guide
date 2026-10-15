@@ -164,6 +164,22 @@ export function moveBox(frameId: string, boxId: string, to: { x: number; y: numb
   });
 }
 
+/** Resize a highlight box (from its handles or Alt + arrow keys). Keeps it inside the image and at least 1% wide/high. */
+export function resizeBox(frameId: string, boxId: string, to: Omit<Highlight, "id">) {
+  const { page } = current();
+  const f = page && findFrame(page, frameId);
+  if (!f) return;
+  remember(f);
+  editFrame(frameId, (fr) => {
+    const h = fr.highlights.find((h) => h.id === boxId);
+    if (!h) return;
+    h.x = Math.max(0, Math.min(0.99, to.x));
+    h.y = Math.max(0, Math.min(0.99, to.y));
+    h.width = Math.max(0.01, Math.min(1 - h.x, to.width));
+    h.height = Math.max(0.01, Math.min(1 - h.y, to.height));
+  });
+}
+
 export function addHighlight(frameId: string, box: Omit<Highlight, "id">) {
   const { page } = current();
   const f = page && findFrame(page, frameId);
