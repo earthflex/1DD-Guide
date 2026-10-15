@@ -42,7 +42,10 @@ export function PublicGuide() {
       if (error) return { kind: "error", message: "ติดต่อระบบไม่ได้ กรุณาลองใหม่" };
       if (raw) return { kind: "ready", ...(await render(raw)) };
       const { data: locked } = await supabase.rpc("guide_publication_protected", { share_token: token });
-      if (!locked) return { kind: "error", message: "คู่มือนี้ไม่พร้อมใช้งาน หรือลิงก์ถูกเพิกถอนแล้ว" };
+      if (!locked) {
+        const { data: expired } = await supabase.rpc("guide_publication_expired", { share_token: token });
+        return { kind: "error", message: expired ? "ลิงก์คู่มือนี้หมดอายุแล้ว กรุณาติดต่อทีมงานเพื่อขอลิงก์ใหม่" : "คู่มือนี้ไม่พร้อมใช้งาน หรือลิงก์ถูกเพิกถอนแล้ว" };
+      }
       const saved = sessionStorage.getItem(remember(token));
       if (saved) {
         const { data } = await supabase.rpc("guide_read_publication_with_password", { share_token: token, pass: saved });

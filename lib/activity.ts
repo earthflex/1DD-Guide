@@ -11,7 +11,7 @@ export type ActivityAction =
   | "create_project" | "import_project" | "duplicate_project" | "delete_project" | "update_project" | "rename_project"
   | "add_page" | "duplicate_page" | "delete_page" | "edit_page"
   | "publish" | "revoke"
-  | "add_member" | "remove_member" | "cancel_invite" | "reset_password"
+  | "add_member" | "remove_member" | "cancel_invite" | "reset_password" | "change_role"
   | "delete_media" | "rename_workspace" | "join_workspace" | "save";
 
 type Target = { pid?: string; projectName?: string; pageId?: string; pageTitle?: string; detail?: string };
@@ -34,6 +34,7 @@ export const ACTION_LABEL: Record<ActivityAction, string> = {
   remove_member: "นำสมาชิกออก",
   cancel_invite: "ยกเลิกคำเชิญ",
   reset_password: "ตั้งรหัสผ่านใหม่ให้สมาชิก",
+  change_role: "เปลี่ยนสิทธิ์สมาชิก",
   delete_media: "ลบไฟล์",
   rename_workspace: "เปลี่ยนชื่อ Workspace",
   join_workspace: "เข้าร่วม Workspace",
@@ -44,7 +45,7 @@ export const ACTION_GROUPS: { label: string; actions: ActivityAction[] }[] = [
   { label: "โปรเจกต์", actions: ["create_project", "import_project", "duplicate_project", "delete_project", "update_project", "rename_project"] },
   { label: "เนื้อหา", actions: ["add_page", "duplicate_page", "delete_page", "edit_page", "save"] },
   { label: "เผยแพร่", actions: ["publish", "revoke"] },
-  { label: "สมาชิก", actions: ["add_member", "remove_member", "cancel_invite", "reset_password", "join_workspace"] },
+  { label: "สมาชิก", actions: ["add_member", "remove_member", "cancel_invite", "reset_password", "change_role", "join_workspace"] },
   { label: "ไฟล์และ Workspace", actions: ["delete_media", "rename_workspace"] },
 ];
 

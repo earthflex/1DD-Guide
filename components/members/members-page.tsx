@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyRound, Loader2, Mail, Search, Trash2, UserPlus, X } from "lucide-react";
+import { Crown, KeyRound, Loader2, Mail, Search, Trash2, UserMinus, UserPlus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { FormError } from "@/components/auth/auth-card";
@@ -57,6 +57,7 @@ export function MembersPage() {
 
   const isOwner = !!data?.isOwner;
   const inWorkspace = data?.users.filter((u) => u.role).length ?? 0;
+  const owners = data?.users.filter((u) => u.role === "owner").length ?? 0;
   const q = query.trim().toLowerCase();
   const visible = (data?.users ?? []).filter((u) =>
     (filter === "all" || (filter === "in" ? !!u.role : !u.role)) && (!q || u.email.toLowerCase().includes(q)));
@@ -65,6 +66,24 @@ export function MembersPage() {
     const { error } = await createClient().rpc(name, args);
     if (error) throw new Error(error.message);
     await load();
+  }
+  async function setRole(u: TeamUser, role: "owner" | "editor") {
+    const self = u.id === data?.me;
+    const ok = role === "owner"
+      ? await confirmDialog("ตั้งเป็นเจ้าของ", `${u.email} จะจัดการสมาชิก ตั้งค่า และลบ ${workspaceName} ได้เหมือนคุณ`, "ตั้งเป็นเจ้าของ")
+      : await confirmDialog(self ? "สละสิทธิ์เจ้าของ" : "เปลี่ยนเป็นผู้แก้ไข",
+        self ? `คุณจะยังแก้ไขโปรเจกต์ได้ แต่จัดการสมาชิกและตั้งค่า ${workspaceName} ไม่ได้อีก จนกว่าเจ้าของคนอื่นจะตั้งให้` : `${u.email} จะยังแก้ไขโปรเจกต์ได้ แต่จัดการสมาชิกและตั้งค่า Workspace ไม่ได้`,
+        self ? "สละสิทธิ์" : "เปลี่ยนเป็นผู้แก้ไข", true);
+    if (!ok) return;
+    try {
+      await rpc("guide_set_member_role", { wid, member_id: u.id, new_role: role });
+      logActivity("change_role", { detail: `${u.email} เป็น${role === "owner" ? "เจ้าของ" : "ผู้แก้ไข"}` });
+      toast.success(role === "owner" ? `${u.email} เป็นเจ้าของแล้ว` : self ? "สละสิทธิ์เจ้าของแล้ว" : `${u.email} เป็นผู้แก้ไขแล้ว`);
+    } catch (e) {
+      const message = (e as Error).message;
+      toast.error(/at least one owner/i.test(message) ? "Workspace ต้องมีเจ้าของอย่างน้อย 1 คน"
+        : /Could not find the function|does not exist/i.test(message) ? "ยังไม่ได้เปิดใช้เจ้าของหลายคน ผู้ดูแลต้องรัน supabase/setup.sql ล่าสุดใน Supabase ก่อน" : message);
+    }
   }
   async function addToWorkspace(u: TeamUser) {
     const result = await addExistingMember(wid, u.id);
@@ -118,8 +137,16 @@ export function MembersPage() {
                       เข้าระบบล่าสุด {formatDate(u.lastSignIn)} · อยู่ใน {u.workspaces} Workspace · สร้างบัญชี {formatDate(u.createdAt)}
                     </small>
                   </span>
+                  {isOwner && u.role === "owner" && (u.id !== data.me || owners > 1) && (
+                    <Button variant="ghost" size="sm" onClick={() => setRole(u, "editor")}>
+                      <UserMinus />{u.id === data.me ? "สละสิทธิ์เจ้าของ" : "เปลี่ยนเป็นผู้แก้ไข"}
+                    </Button>
+                  )}
                   {isOwner && u.role !== "owner" && (
                     <span className="flex flex-wrap gap-1">
+                      {u.role === "editor" && (
+                        <Button variant="outline" size="sm" onClick={() => setRole(u, "owner")}><Crown />ตั้งเป็นเจ้าของ</Button>
+                      )}
                       {u.managed && (
                         <Button variant="outline" size="sm" onClick={() => setReset({ user_id: u.id, email: u.email })}><KeyRound />ตั้งรหัสผ่านใหม่</Button>
                       )}

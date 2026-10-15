@@ -1,5 +1,5 @@
 -- 1DD Guide v2 — run in Supabase SQL Editor as project administrator.
--- Includes the activity log and viewing passwords for published links (Next.js app).
+-- Includes the activity log, viewing passwords, link stats/expiry and multiple owners (Next.js app).
 -- Idempotent: re-running does not delete existing workspaces or publications.
 begin;
 
@@ -43,6 +43,10 @@ alter table public.guide_publications drop constraint if exists guide_publicatio
 alter table public.guide_publications add constraint guide_publications_slug_format
   check (slug is null or slug ~ '^[a-z0-9][a-z0-9-]{1,58}[a-z0-9]$');
 create unique index if not exists guide_publications_slug on public.guide_publications(slug) where slug is not null;
+-- How often customers opened the link (team members' own views are not counted), and an optional expiry.
+alter table public.guide_publications add column if not exists view_count bigint not null default 0;
+alter table public.guide_publications add column if not exists last_viewed_at timestamptz;
+alter table public.guide_publications add column if not exists expires_at timestamptz;
 
 alter table public.guide_workspaces enable row level security;
 alter table public.guide_members enable row level security;
@@ -127,6 +131,21 @@ begin
   delete from public.guide_members where workspace_id=wid and user_id=member_id and role<>'owner';
 end;
 $$;
+-- Owners promote members to owner or step them back to editor. A workspace always keeps one owner.
+create or replace function public.guide_set_member_role(wid uuid, member_id uuid, new_role text)
+returns void language plpgsql security definer set search_path='' as $$
+begin
+  if not public.guide_is_owner(wid) then raise exception 'Only an owner can change roles'; end if;
+  if new_role is null or new_role not in ('owner','editor') then raise exception 'Invalid role'; end if;
+  -- Serialize role changes per workspace, so two owners demoting each other cannot leave none.
+  perform 1 from public.guide_workspaces where id=wid for update;
+  update public.guide_members set role=new_role where workspace_id=wid and user_id=member_id;
+  if not found then raise exception 'Member not found'; end if;
+  if not exists(select 1 from public.guide_members where workspace_id=wid and role='owner') then
+    raise exception 'A workspace needs at least one owner';
+  end if;
+end;
+$$;
 create or replace function public.guide_cancel_invite(wid uuid, member_email text)
 returns void language plpgsql security definer set search_path='' as $$
 begin
@@ -160,31 +179,57 @@ begin
 end;
 $$;
 
--- Links open by the random 64-character token or by the optional slug.
--- Public read without a password: protected links return nothing here.
+-- Links open by the random 64-character token or by the optional slug, until they expire.
+-- Public read without a password: protected links return nothing here. Each read counts one view.
 create or replace function public.guide_read_publication(share_token text)
-returns jsonb language sql stable security definer set search_path='' as $$
-  select payload from public.guide_publications
-  where ((token=share_token and length(share_token)=64) or (slug is not null and slug=share_token)) and password_hash is null;
+returns jsonb language plpgsql volatile security definer set search_path='' as $$
+declare pub record;
+begin
+  select workspace_id, project_id, payload into pub from public.guide_publications
+    where ((token=share_token and length(share_token)=64) or (slug is not null and slug=share_token))
+      and password_hash is null and (expires_at is null or expires_at>now());
+  if not found then return null; end if;
+  perform public.guide_count_view(pub.workspace_id, pub.project_id);
+  return pub.payload;
+end;
+$$;
+
+-- One customer view. Team members opening their own workspace's link are not counted.
+create or replace function public.guide_count_view(wid uuid, pid text)
+returns void language plpgsql volatile security definer set search_path='' as $$
+begin
+  if public.guide_is_member(wid) then return; end if;
+  update public.guide_publications set view_count=view_count+1, last_viewed_at=now() where workspace_id=wid and project_id=pid;
+end;
 $$;
 
 -- Lets the viewer page know it should ask for a password (reveals nothing else).
 create or replace function public.guide_publication_protected(share_token text)
 returns boolean language sql stable security definer set search_path='' as $$
   select exists(select 1 from public.guide_publications
-    where ((token=share_token and length(share_token)=64) or (slug is not null and slug=share_token)) and password_hash is not null);
+    where ((token=share_token and length(share_token)=64) or (slug is not null and slug=share_token))
+      and password_hash is not null and (expires_at is null or expires_at>now()));
+$$;
+
+-- Lets the viewer page say "this link has expired" instead of "not found".
+create or replace function public.guide_publication_expired(share_token text)
+returns boolean language sql stable security definer set search_path='' as $$
+  select exists(select 1 from public.guide_publications
+    where ((token=share_token and length(share_token)=64) or (slug is not null and slug=share_token)) and expires_at<=now());
 $$;
 
 -- Read a protected link. A wrong password waits a moment to slow down guessing.
 create or replace function public.guide_read_publication_with_password(share_token text, pass text)
 returns jsonb language plpgsql volatile security definer set search_path='' as $$
-declare result jsonb;
+declare pub record;
 begin
   if share_token is null or length(share_token)>64 or pass is null or length(pass)>200 then return null; end if;
-  select payload into result from public.guide_publications
-    where ((token=share_token and length(share_token)=64) or (slug is not null and slug=share_token)) and password_hash is not null and password_hash=extensions.crypt(pass,password_hash);
-  if result is null then perform pg_sleep(0.5); end if;
-  return result;
+  select workspace_id, project_id, payload into pub from public.guide_publications
+    where ((token=share_token and length(share_token)=64) or (slug is not null and slug=share_token))
+      and password_hash is not null and password_hash=extensions.crypt(pass,password_hash) and (expires_at is null or expires_at>now());
+  if not found then perform pg_sleep(0.5); return null; end if;
+  perform public.guide_count_view(pub.workspace_id, pub.project_id);
+  return pub.payload;
 end;
 $$;
 
@@ -217,12 +262,24 @@ exception when unique_violation then
 end;
 $$;
 
+-- Set or clear (null) when a published link stops opening. Any workspace member.
+create or replace function public.guide_set_publication_expiry(wid uuid, pid text, expires timestamptz)
+returns void language plpgsql security definer set search_path='' as $$
+begin
+  if not public.guide_is_member(wid) then raise exception 'Permission denied'; end if;
+  if expires is not null and expires<=now() then raise exception 'Expiry must be in the future'; end if;
+  update public.guide_publications set expires_at=expires where workspace_id=wid and project_id=pid;
+  if not found then raise exception 'Publish the project before setting an expiry'; end if;
+end;
+$$;
+
 -- Publish status for the dashboard, without downloading the (large) payloads or exposing hashes.
 drop function if exists public.guide_publication_status(uuid);
 create or replace function public.guide_publication_status(wid uuid)
-returns table(project_id text, token text, slug text, updated_at timestamptz, has_password boolean)
+returns table(project_id text, token text, slug text, updated_at timestamptz, has_password boolean,
+  view_count bigint, last_viewed_at timestamptz, expires_at timestamptz)
 language sql stable security definer set search_path='' as $$
-  select p.project_id, p.token, p.slug, p.updated_at, p.password_hash is not null
+  select p.project_id, p.token, p.slug, p.updated_at, p.password_hash is not null, p.view_count, p.last_viewed_at, p.expires_at
   from public.guide_publications p where p.workspace_id=wid and public.guide_is_member(wid);
 $$;
 
@@ -370,9 +427,13 @@ grant execute on function public.guide_read_publication(text) to anon,authentica
 revoke all on function public.guide_publication_protected(text),public.guide_read_publication_with_password(text,text),
   public.guide_set_publication_password(uuid,text,text),public.guide_publication_status(uuid),
   public.guide_log(uuid,text,text,text,text,text,text),public.guide_activity_on_save(),
-  public.guide_set_publication_slug(uuid,text,text),public.guide_system_overview(),public.guide_join_workspace(uuid),public.guide_is_team() from public,anon,authenticated;
-grant execute on function public.guide_publication_protected(text),public.guide_read_publication_with_password(text,text) to anon,authenticated;
+  public.guide_set_publication_slug(uuid,text,text),public.guide_system_overview(),public.guide_join_workspace(uuid),public.guide_is_team(),
+  public.guide_count_view(uuid,text),public.guide_publication_expired(text),public.guide_set_publication_expiry(uuid,text,timestamptz),
+  public.guide_set_member_role(uuid,uuid,text) from public,anon,authenticated;
+grant execute on function public.guide_publication_protected(text),public.guide_read_publication_with_password(text,text),
+  public.guide_publication_expired(text) to anon,authenticated;
 grant execute on function public.guide_set_publication_password(uuid,text,text),public.guide_publication_status(uuid),
   public.guide_log(uuid,text,text,text,text,text,text),public.guide_set_publication_slug(uuid,text,text),
-  public.guide_system_overview(),public.guide_join_workspace(uuid) to authenticated;
+  public.guide_system_overview(),public.guide_join_workspace(uuid),public.guide_set_publication_expiry(uuid,text,timestamptz),
+  public.guide_set_member_role(uuid,uuid,text) to authenticated;
 commit;

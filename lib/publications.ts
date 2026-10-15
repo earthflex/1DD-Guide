@@ -6,7 +6,18 @@ import { logActivity } from "@/lib/activity";
 import { useWorkspace } from "@/lib/store";
 import { createClient } from "@/lib/supabase/client";
 
-export type Publication = { token: string; slug: string | null; updatedAt: string; hasPassword: boolean };
+export type Publication = {
+  token: string; slug: string | null; updatedAt: string; hasPassword: boolean;
+  /** Customer opens (team members' own views are not counted). */
+  views: number; lastViewedAt: string | null; expiresAt: string | null;
+};
+
+type Row = {
+  project_id: string; token: string; slug: string | null; updated_at: string; has_password: boolean;
+  view_count?: number; last_viewed_at?: string | null; expires_at?: string | null;
+};
+
+export const isExpired = (pub: Pick<Publication, "expiresAt">, now = Date.now()) => !!pub.expiresAt && Date.parse(pub.expiresAt) <= now;
 
 type State = {
   wid: string | null;
@@ -23,8 +34,11 @@ export async function loadPublications(wid: string) {
     return;
   }
   const map = new Map<string, Publication>();
-  for (const r of (data ?? []) as { project_id: string; token: string; slug: string | null; updated_at: string; has_password: boolean }[])
-    map.set(r.project_id, { token: r.token, slug: r.slug ?? null, updatedAt: r.updated_at, hasPassword: r.has_password });
+  for (const r of (data ?? []) as Row[])
+    map.set(r.project_id, {
+      token: r.token, slug: r.slug ?? null, updatedAt: r.updated_at, hasPassword: r.has_password,
+      views: Number(r.view_count ?? 0), lastViewedAt: r.last_viewed_at ?? null, expiresAt: r.expires_at ?? null,
+    });
   usePublications.setState({ wid, status: map });
 }
 
@@ -73,5 +87,21 @@ export async function setPublicationPassword(pid: string, password: string | nul
   }
   const name = useWorkspace.getState().projects.find((p) => p.id === pid)?.name;
   logActivity("update_project", { pid, projectName: name, detail: password ? "ตั้งรหัสผ่านลิงก์คู่มือ" : "ยกเลิกรหัสผ่านลิงก์คู่มือ" });
+  if (wid) await loadPublications(wid);
+}
+
+/** Set (ISO date-time in the future) or clear (null) when the link stops opening. */
+export async function setPublicationExpiry(pid: string, expires: string | null) {
+  const wid = useWorkspace.getState().wid;
+  const { error } = await createClient().rpc("guide_set_publication_expiry", { wid, pid, expires });
+  if (error) {
+    if (/future/i.test(error.message)) throw new Error("วันหมดอายุต้องเป็นวันในอนาคต");
+    if (/function .*does not exist|Could not find the function/i.test(error.message))
+      throw new Error("ยังไม่ได้เปิดใช้วันหมดอายุลิงก์ ผู้ดูแลต้องรัน supabase/setup.sql ล่าสุดใน Supabase ก่อน");
+    throw new Error(error.message);
+  }
+  const name = useWorkspace.getState().projects.find((p) => p.id === pid)?.name;
+  const label = expires ? new Date(expires).toLocaleDateString("th-TH", { dateStyle: "medium" }) : "";
+  logActivity("update_project", { pid, projectName: name, detail: expires ? `ตั้งให้ลิงก์หมดอายุ ${label}` : "ยกเลิกวันหมดอายุลิงก์" });
   if (wid) await loadPublications(wid);
 }

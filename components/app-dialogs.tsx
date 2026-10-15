@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, BookOpen, Copy, Download, ExternalLink, FileText, Globe, Link2, Loader2, Lock, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, CalendarClock, Copy, Download, ExternalLink, FileText, Globe, Link2, Loader2, Lock, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { FormError } from "@/components/auth/auth-card";
@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { filename } from "@/lib/guide-core";
 import { exportJSON, publishProject, revokeProject } from "@/lib/projects";
 import { pairingToken } from "@/lib/editor";
-import { setPublicationPassword, setPublicationSlug, shareURL, SLUG_RE, suggestSlug, usePublication, usePublications } from "@/lib/publications";
+import { isExpired, setPublicationExpiry, setPublicationPassword, setPublicationSlug, shareURL, SLUG_RE, suggestSlug, usePublication, usePublications, type Publication } from "@/lib/publications";
 import { useWorkspace } from "@/lib/store";
 import { closeDialog, closePreview, openDialog, openPreview, useDialog } from "@/lib/ui";
 import { download, GUIDE_SANDBOX, makeHTML, resolveImages } from "@/lib/viewer";
@@ -135,7 +135,7 @@ function PublishPanel({ pid }: { pid: string }) {
       <DialogHeader>
         <DialogTitle>ลิงก์คู่มือ · {p.name}</DialogTitle>
         <DialogDescription>
-          {pub ? `เผยแพร่ล่าสุด ${new Date(pub.updatedAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })}` : "เผยแพร่แล้ว"}
+          {pub ? `เผยแพร่ล่าสุด ${dateTime(pub.updatedAt)} · ${pub.views ? `ลูกค้าเปิดดู ${pub.views.toLocaleString("th-TH")} ครั้ง ล่าสุด ${dateTime(pub.lastViewedAt!)}` : "ลูกค้ายังไม่เคยเปิด"}` : "เผยแพร่แล้ว"}
         </DialogDescription>
       </DialogHeader>
       {stale && (
@@ -154,12 +154,73 @@ function PublishPanel({ pid }: { pid: string }) {
       </div>
       {pub && !unavailable && <LinkSlug pid={pid} slug={pub.slug} hasPassword={pub.hasPassword} suggestion={suggestSlug(p.name, p.website)} />}
       <LinkPassword pid={pid} url={url} hasPassword={!!pub?.hasPassword} unavailable={unavailable} />
+      {pub && !unavailable && <LinkExpiry pid={pid} pub={pub} />}
       <FormError message={error} />
       <div className="flex flex-wrap justify-between gap-2 border-t pt-4">
         <Button variant="destructive" onClick={revoke}><Trash2 />เพิกถอนลิงก์</Button>
         {!stale && <Button variant="outline" onClick={publish} disabled={busy}>{busy && <Loader2 className="animate-spin" />}อัปเดตลิงก์อีกครั้ง</Button>}
       </div>
     </div>
+  );
+}
+
+const dateTime = (s: string) => new Date(s).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
+const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** When the link stops opening for customers. The link closes at the end of the chosen day (local time). */
+function LinkExpiry({ pid, pub }: { pid: string; pub: Publication }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  // Read once per open panel: date maths stays out of render.
+  const [now] = useState(Date.now);
+  const expired = isExpired(pub, now);
+  const inDays = (n: number) => day(new Date(now + n * 86400000));
+  const tomorrow = inDays(1);
+
+  async function save(date: string | null) {
+    setBusy(true);
+    setError("");
+    try {
+      await setPublicationExpiry(pid, date ? new Date(`${date}T23:59:59`).toISOString() : null);
+      setEditing(false);
+      toast.success(date ? "ตั้งวันหมดอายุลิงก์แล้ว" : "ยกเลิกวันหมดอายุแล้ว ลิงก์เปิดได้ตลอด");
+    } catch (e) { setError((e as Error).message); }
+    setBusy(false);
+  }
+
+  const until = pub.expiresAt && new Date(pub.expiresAt).toLocaleDateString("th-TH", { dateStyle: "medium" });
+  return (
+    <section className="grid gap-3 rounded-lg border p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <CalendarClock className={expired ? "size-4 text-destructive" : "size-4 text-muted-foreground"} />
+        <span className={expired ? "flex-1 text-sm font-medium text-destructive" : "flex-1 text-sm font-medium"}>
+          {expired ? `ลิงก์หมดอายุแล้ว (${until}) ลูกค้าเปิดไม่ได้` : until ? `เปิดได้ถึง ${until}` : "ลิงก์ไม่มีวันหมดอายุ"}
+        </span>
+        {!editing && <Button size="sm" variant={expired ? "default" : "outline"} onClick={() => { setValue(pub.expiresAt && !expired ? day(new Date(pub.expiresAt)) : inDays(30)); setEditing(true); }}>
+          {expired ? "ต่ออายุ" : until ? "เปลี่ยนวัน" : "ตั้งวันหมดอายุ"}
+        </Button>}
+        {!editing && until && <Button size="sm" variant="ghost" disabled={busy} onClick={() => save(null)}>ไม่หมดอายุ</Button>}
+      </div>
+      {editing && (
+        <form onSubmit={(e) => { e.preventDefault(); void save(value); }} className="grid gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input type="date" value={value} min={tomorrow} required onChange={(e) => setValue(e.target.value)} aria-label="วันหมดอายุ" className="w-auto" autoFocus />
+            {[7, 30, 90].map((n) => (
+              <Button key={n} type="button" size="sm" variant="ghost" onClick={() => setValue(inDays(n))}>{n} วัน</Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">ลิงก์จะปิดเมื่อสิ้นวันที่เลือก ต่ออายุหรือยกเลิกได้ภายหลัง</p>
+          <FormError message={error} />
+          <div className="flex gap-2">
+            <Button type="submit" disabled={busy || !value}>{busy && <Loader2 className="animate-spin" />}บันทึกวันหมดอายุ</Button>
+            <Button type="button" variant="ghost" onClick={() => { setEditing(false); setError(""); }}>ยกเลิก</Button>
+          </div>
+        </form>
+      )}
+      {!editing && error && <FormError message={error} />}
+    </section>
   );
 }
 
