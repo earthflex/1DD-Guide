@@ -215,11 +215,12 @@ export function setImageLabel(frameId: string, value: string) {
   editFrame(frameId, (f) => { f.imageLabel = value.trim().slice(0, 80); });
 }
 
-export function jumpToFrame(id: string) {
+/** Scroll to a frame and make it active. `keepFocus` leaves focus where it is (e.g. while renaming it). */
+export function jumpToFrame(id: string, { keepFocus = false } = {}) {
   activateFrame(id);
   requestAnimationFrame(() => {
     const section = visible(`#editor-image-${id}`);
-    section?.focus({ preventScroll: true });
+    if (!keepFocus) section?.focus({ preventScroll: true });
     section?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   });
 }

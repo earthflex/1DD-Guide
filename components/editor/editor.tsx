@@ -291,21 +291,24 @@ function ImageStrip({ page, onUpload, onCapture }: { page: Page; onUpload: () =>
               >
                 <GuideImage frame={f} alt="" className="size-full object-cover object-top" fallback={<ImageIcon className="size-4 text-muted-foreground" />} />
               </button>
-              <input
-                key={label}
-                defaultValue={label}
-                size={Math.max(5, Math.min(18, label.length))}
-                maxLength={80}
-                aria-label={`ชื่อภาพ ${n + 1}`}
-                title="พิมพ์เพื่อเปลี่ยนชื่อภาพ"
-                onFocus={() => jumpToFrame(f.id)}
-                onBlur={(e) => { if (e.target.value.trim() !== label) setImageLabel(f.id, e.target.value); }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
-                  if (e.key === "Escape") { e.currentTarget.value = label; e.currentTarget.blur(); }
-                }}
-                className="bg-transparent text-xs outline-none"
-              />
+              <label className="group/label flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-muted focus-within:bg-muted focus-within:ring-2 focus-within:ring-ring/50">
+                <input
+                  key={label}
+                  defaultValue={label}
+                  size={Math.max(5, Math.min(18, label.length))}
+                  maxLength={80}
+                  aria-label={`ชื่อภาพ ${n + 1}`}
+                  title="คลิกเพื่อเปลี่ยนชื่อภาพ"
+                  onFocus={(e) => { e.currentTarget.select(); jumpToFrame(f.id, { keepFocus: true }); }}
+                  onBlur={(e) => { if (e.target.value.trim() !== label) setImageLabel(f.id, e.target.value); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                    if (e.key === "Escape") { e.currentTarget.value = label; e.currentTarget.blur(); }
+                  }}
+                  className="bg-transparent text-xs outline-none"
+                />
+                <Pencil aria-hidden className="size-3 text-muted-foreground opacity-50 group-hover/label:opacity-100 group-focus-within/label:opacity-100" />
+              </label>
             </div>
           );
         })}
