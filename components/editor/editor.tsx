@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm";
 import { FrameSection, type ImageSource } from "@/components/editor/frame-section";
@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  appendImages, applyUndo, current, deletePage, duplicatePage, editPage, imageLabel, jumpToFrame, movePage,
+  appendImages, applyUndo, current, deletePage, duplicatePage, editPage, imageLabel, jumpToFrame, moveFrame, movePage,
   openPage, pairingToken, replaceImage, setImageLabel, setSecondImage, useEditor,
 } from "@/lib/editor";
 import { frames, imageURL, safeURL, stepBase, type Page } from "@/lib/guide-core";
@@ -273,9 +273,29 @@ function ImageStrip({ page, onUpload, onCapture }: { page: Page; onUpload: () =>
   const active = useEditor((s) => s.activeFrame);
   const images = frames(page);
   const full = images.length >= 20 && !!(page.image || page._imagePath);
+  // Drag a thumbnail onto another to reorder; `over` marks the side the image will land on.
+  const [drag, setDrag] = useState<number | null>(null);
+  const [over, setOver] = useState<{ n: number; after: boolean } | null>(null);
+  const strip = useRef<HTMLDivElement>(null);
+
+  function move(from: number, to: number) {
+    const id = moveFrame(from, to);
+    if (!id) return;
+    jumpToFrame(id, { keepFocus: true });
+    requestAnimationFrame(() => strip.current?.querySelectorAll<HTMLElement>("[data-thumb]")[to]?.focus());
+  }
+  function drop() {
+    if (drag !== null && over) {
+      const slot = over.n + (over.after ? 1 : 0);
+      move(drag, slot > drag ? slot - 1 : slot);
+    }
+    setDrag(null);
+    setOver(null);
+  }
+
   return (
     <div aria-label="ภาพในเนื้อหานี้" className="sticky top-14 z-[5] -mx-2 flex items-center gap-2 overflow-x-auto bg-background/90 px-2 py-2 backdrop-blur">
-      <div className="flex gap-2">
+      <div ref={strip} className="flex gap-2">
         {images.map((f, n) => {
           const isActive = active ? active === f.id : n === 0;
           const label = imageLabel(f, n);
@@ -283,14 +303,44 @@ function ImageStrip({ page, onUpload, onCapture }: { page: Page; onUpload: () =>
             <Fragment key={f.id}>
             {/* Sub-heading sections start here: a divider, like the one readers see. */}
             {n > 0 && f.section !== undefined && <span aria-hidden title={f.section || "หัวข้อย่อย"} className="mx-1 h-9 w-0.5 shrink-0 rounded-full bg-brand/40" />}
-            <div className={cn("flex items-center gap-1.5 rounded-lg border p-1 pr-2", isActive && "border-brand bg-brand/5")}>
+            <div
+              className={cn(
+                "relative flex items-center gap-1.5 rounded-lg border p-1 pr-2 transition-opacity",
+                isActive && "border-brand bg-brand/5",
+                drag === n && "opacity-40",
+              )}
+              onDragOver={(e) => {
+                if (drag === null) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const r = e.currentTarget.getBoundingClientRect();
+                const after = e.clientX > r.left + r.width / 2;
+                if (over?.n !== n || over.after !== after) setOver({ n, after });
+              }}
+              onDrop={(e) => { e.preventDefault(); drop(); }}
+            >
+              {over?.n === n && drag !== null && drag !== n && (
+                <span aria-hidden className={cn("absolute inset-y-0 w-0.5 rounded-full bg-brand", over.after ? "-right-[5px]" : "-left-[5px]")} />
+              )}
               <button
                 type="button"
+                data-thumb
+                draggable={images.length > 1}
+                onDragStart={(e) => { setDrag(n); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", label); }}
+                onDragEnd={() => { setDrag(null); setOver(null); }}
                 onClick={() => jumpToFrame(f.id)}
+                onKeyDown={(e) => {
+                  if (!e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+                  e.preventDefault();
+                  const to = n + (e.key === "ArrowLeft" ? -1 : 1);
+                  if (to >= 0 && to < images.length) move(n, to);
+                }}
                 aria-label={`ไปยัง ${label}`}
                 aria-controls={`editor-image-${f.id}`}
                 aria-pressed={isActive}
-                className="grid h-9 w-14 place-items-center overflow-hidden rounded-md bg-muted"
+                aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
+                title={images.length > 1 ? "ลากเพื่อสลับลำดับภาพ · Alt + ← / → เพื่อเลื่อน" : undefined}
+                className={cn("grid h-9 w-14 place-items-center overflow-hidden rounded-md bg-muted", images.length > 1 && "cursor-grab active:cursor-grabbing")}
               >
                 <GuideImage frame={f} alt="" className="size-full object-cover object-top" fallback={<ImageIcon className="size-4 text-muted-foreground" />} />
               </button>

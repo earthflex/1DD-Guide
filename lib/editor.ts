@@ -367,6 +367,45 @@ export async function appendImages(data: string[]) {
   toast.success(`เพิ่ม ${data.length} ภาพแล้ว`);
 }
 
+/** Fields of one image. The first image lives on the page object itself (with the page's title, URL…). */
+const FRAME_KEYS = ["image", "_imagePath", "image2", "_imagePath2", "imageLabel", "section", "steps", "highlights", "arrows"] as const;
+
+/**
+ * Move image `from` to position `to` in the current page. Content moves between slots while the page
+ * keeps its id: the first slot always uses the page id, and the image that leaves it takes over the id
+ * of the one that arrives. Returns the moved image's id afterwards.
+ */
+export function moveFrame(from: number, to: number) {
+  const { page } = current();
+  const total = page ? frames(page).length : 0;
+  if (!page || from === to || from < 0 || to < 0 || from >= total || to >= total) return;
+  let moved = "";
+  editPage((q) => {
+    const list: Frame[] = frames(q).map((f) => {
+      const out = { id: f.id } as Frame;
+      for (const k of FRAME_KEYS) if (f[k] !== undefined) (out as Record<string, unknown>)[k] = copy(f[k]);
+      return out;
+    });
+    const [m] = list.splice(from, 1);
+    list.splice(to, 0, m);
+    const arriving = list[0].id;
+    for (const f of list) if (f.id === q.id) f.id = arriving;
+    list[0].id = q.id;
+    moved = m.id;
+    const first = list[0] as Record<string, unknown>, target = q as unknown as Record<string, unknown>;
+    for (const k of FRAME_KEYS) {
+      if (first[k] !== undefined) target[k] = first[k];
+      else if (k === "image") target[k] = "";
+      else if (k === "steps" || k === "highlights") target[k] = [];
+      else delete target[k];
+    }
+    q.extraImages = list.slice(1);
+  });
+  // Undo snapshots are keyed by image id, which may now point at other content.
+  useEditor.setState({ undo: [], activeFrame: moved, selected: "", selectedBox: "" });
+  return moved;
+}
+
 export function removeImage(frameId: string) {
   editPage((q) => {
     // A removed image that opened a section hands its heading to the next image of that section.
