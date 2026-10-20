@@ -8,7 +8,8 @@ import {
   activateFrame, addArrow, addHighlight, addPin, deleteArrow, deleteHighlight, moveBox, movePin, redactArea, resizeBox, setArrow, useEditor,
   type ArrowPos, type Tool,
 } from "@/lib/editor";
-import { isPair, placed, type Arrow, type Frame, type Highlight } from "@/lib/guide-core";
+import { isPair, placed, stepNumbers, type Arrow, type Frame, type Highlight } from "@/lib/guide-core";
+import { richPlain } from "@/lib/rich-text";
 import { cn } from "@/lib/utils";
 import { visible } from "@/lib/dom";
 
@@ -43,7 +44,7 @@ type Drag =
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 /** Screenshot with pins and highlight boxes; ported from bindCanvas() in legacy/app.js. */
-export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Tool; alt: string }) {
+export function AnnotationCanvas({ frame, mode, base = 0, alt }: { frame: Frame; mode: Tool; base?: number; alt: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   const selected = useEditor((s) => s.selected);
@@ -54,6 +55,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
   const [sizing, setSizing] = useState<{ id: string; rect: Rect } | null>(null);
   const [arrowLive, setArrowLive] = useState<{ id: string; pos: ArrowPos } | null>(null);
   const arrows = frame.arrows ?? [];
+  const numbers = stepNumbers(frame.steps, base);
 
   const coords = (ev: React.PointerEvent): Point => {
     const r = ref.current!.getBoundingClientRect();
@@ -137,9 +139,9 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
   async function onPointerUp(ev: React.PointerEvent) {
     const d = drag.current;
     if (!d) {
-      if (mode === "pin" && !(ev.target as HTMLElement).closest("[data-pin]")) {
+      if ((mode === "pin" || mode === "dot") && !(ev.target as HTMLElement).closest("[data-pin]")) {
         const pos = coords(ev);
-        addPin(frame.id, pos.x, pos.y);
+        addPin(frame.id, pos.x, pos.y, mode === "dot");
       }
       return;
     }
@@ -239,7 +241,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
       useEditor.setState({ selected: s.id });
-      visible(`[data-step="${s.id}"][data-step-field="title"]`)?.focus();
+      visible(`[data-step="${s.id}"][data-step-field="text"]`)?.focus();
     }
   }
 
@@ -250,7 +252,7 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
       data-tool={mode}
       className={cn(
         "relative w-full touch-pan-y bg-white leading-none shadow-sm select-none",
-        (mode === "pin" || mode === "redact" || mode === "highlight" || mode === "arrow") && "cursor-crosshair touch-none",
+        (mode === "pin" || mode === "dot" || mode === "redact" || mode === "highlight" || mode === "arrow") && "cursor-crosshair touch-none",
       )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -301,19 +303,21 @@ export function AnnotationCanvas({ frame, mode, alt }: { frame: Frame; mode: Too
       {frame.steps.map((s, n) => {
         if (!placed(s)) return null;
         const pos = moving?.id === s.id ? moving : (s as { x: number; y: number });
+        const num = numbers[n];
         return (
           <button
             key={s.id}
             type="button"
             data-pin={s.id}
-            aria-label={`หมายเลข ${n + 1}: ${s.title}`}
+            aria-label={`${num === null ? "จุด" : `หมายเลข ${num}`}: ${s.title || richPlain(s.text).split("\n")[0].slice(0, 80)}`}
             className={cn(
-              "absolute z-[2] grid size-[27px] -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none place-items-center rounded-full border-2 border-white bg-brand p-0 text-[11px] font-bold text-white shadow-md active:cursor-grabbing",
+              "absolute z-[2] grid -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none place-items-center rounded-full border-2 border-white bg-brand p-0 text-[11px] font-bold text-white shadow-md active:cursor-grabbing",
+              num === null ? "size-4" : "size-[27px]",
               s.id === selected && "outline-3 outline-offset-2 outline-brand/35",
             )}
             style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}
           >
-            {n + 1}
+            {num}
           </button>
         );
       })}

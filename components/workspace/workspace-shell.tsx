@@ -1,31 +1,37 @@
 "use client";
 
 import {
-  ArrowLeft, ArrowLeftRight, Check, ChevronsUpDown, FolderOpen, Gauge, KeyRound, CircleAlert, CircleHelp, Download, History, Images, LayoutGrid, Loader2, LogOut, Plus,
+  ArrowLeft, ArrowLeftRight, Check, ChevronRight, ChevronsUpDown, FolderOpen, Gauge, KeyRound, CircleAlert, CircleHelp, Download, History, Images, LayoutGrid, Loader2, LogOut, Plus,
   Puzzle, RefreshCw, RotateCw, Settings, Settings2, Upload, Users,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AppDialogs } from "@/components/app-dialogs";
 import { InlineInput } from "@/components/inline-input";
 import { ConfirmHost, confirmDialog } from "@/components/confirm";
 import { openPageDialog, PageDialogHost } from "@/components/editor/page-dialog";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarHeader, SidebarInset,
-  SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
+  SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton,
+  SidebarMenuSubItem, SidebarProvider, SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { hasUnsaved, saveStateOf, useWorkspace } from "@/lib/store";
 import { exportJSON, renameProject } from "@/lib/projects";
 import { loadPublications } from "@/lib/publications";
 import { openDialog } from "@/lib/ui";
+import { visible } from "@/lib/dom";
+import { jumpToFrame, useEditor } from "@/lib/editor";
+import { frames } from "@/lib/guide-core";
+import { cn } from "@/lib/utils";
 import { lastWorkspace, signOut } from "@/lib/workspaces";
 import { importGuideFile } from "@/components/workspace/import-guide";
 
@@ -56,7 +62,10 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
       <WorkspaceSidebar wid={wid} />
       <SidebarInset>
         <header className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b bg-background/90 px-4 backdrop-blur">
-          <SidebarTrigger className="-ml-1" />
+          <Tooltip>
+            <TooltipTrigger asChild><SidebarTrigger className="-ml-1" aria-keyshortcuts="Control+\ Meta+\" /></TooltipTrigger>
+            <TooltipContent side="bottom">ซ่อน / แสดงแถบด้านข้าง (Ctrl / Cmd + {"\\"})</TooltipContent>
+          </Tooltip>
           <WorkspaceName />
           <div className="ml-auto"><SaveStatus /></div>
         </header>
@@ -92,6 +101,26 @@ function WorkspaceSidebar({ wid }: { wid: string }) {
   const activePage = project?.pages.find((q) => q.id === pageId) ?? project?.pages[0];
   const pathname = usePathname();
   const onMedia = pathname.endsWith("/media"), onMembers = pathname.endsWith("/members");
+  // Sub-heading sections under each page: shown for the open page unless toggled.
+  const [openPages, setOpenPages] = useState<Record<string, boolean>>({});
+  const activeFrame = useEditor((s) => s.activeFrame);
+  const activeSection = (() => {
+    if (!activePage) return "";
+    const all = frames(activePage), at = Math.max(0, all.findIndex((f) => f.id === activeFrame));
+    for (let i = at; i >= 0; i--) if (all[i].section !== undefined) return all[i].id;
+    return "";
+  })();
+  function goToSection(event: React.MouseEvent, pageId: string, frameId: string) {
+    if (pageId === activePage?.id && pathname.includes(`/p/${pid}/`)) {
+      event.preventDefault();
+      jumpToFrame(frameId);
+      return;
+    }
+    // Another page: let the link navigate, then scroll once its editor is on screen.
+    let tries = 0;
+    const wait = () => (visible(`#editor-image-${frameId}`) ? jumpToFrame(frameId) : ++tries < 40 && setTimeout(wait, 100));
+    setTimeout(wait, 100);
+  }
   async function logout() {
     await useWorkspace.getState().flush();
     await signOut();
@@ -128,16 +157,46 @@ function WorkspaceSidebar({ wid }: { wid: string }) {
             <SidebarGroupLabel>เนื้อหา</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu aria-label="เนื้อหา">
-                {project.pages.map((q, n) => (
-                  <SidebarMenuItem key={q.id}>
-                    <SidebarMenuButton asChild isActive={q.id === activePage?.id} className="h-auto py-2 data-[active=true]:bg-brand/10 data-[active=true]:text-foreground">
-                      <Link href={`/w/${wid}/p/${project.id}/${q.id}`} aria-current={q.id === activePage?.id ? "page" : undefined}>
-                        <span className="w-5 shrink-0 text-xs text-muted-foreground tabular-nums">{String(n + 1).padStart(2, "0")}</span>
-                        <span className="line-clamp-2">{q.title || "เนื้อหาใหม่"}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {project.pages.map((q, n) => {
+                  const href = `/w/${wid}/p/${project.id}/${q.id}`;
+                  const sections = frames(q).filter((f) => f.section?.trim());
+                  const open = sections.length > 0 && (openPages[q.id] ?? q.id === activePage?.id);
+                  return (
+                    <SidebarMenuItem key={q.id}>
+                      <SidebarMenuButton asChild isActive={q.id === activePage?.id} className={cn("h-auto py-2 data-[active=true]:bg-brand/10 data-[active=true]:text-foreground", sections.length && "pr-8")}>
+                        <Link href={href} aria-current={q.id === activePage?.id ? "page" : undefined}>
+                          <span className="w-5 shrink-0 text-xs text-muted-foreground tabular-nums">{String(n + 1).padStart(2, "0")}</span>
+                          <span className="line-clamp-2">{q.title || "เนื้อหาใหม่"}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                      {sections.length > 0 && (
+                        <SidebarMenuAction
+                          aria-expanded={open}
+                          aria-label={`${open ? "ซ่อน" : "แสดง"}หัวข้อย่อยของ ${q.title}`}
+                          title={open ? "ซ่อนหัวข้อย่อย" : "แสดงหัวข้อย่อย"}
+                          onClick={() => setOpenPages((o) => ({ ...o, [q.id]: !open }))}
+                          className="top-2"
+                        >
+                          <ChevronRight className={cn("transition-transform", open && "rotate-90")} />
+                        </SidebarMenuAction>
+                      )}
+                      {open && (
+                        <SidebarMenuSub>
+                          {sections.map((f) => (
+                            <SidebarMenuSubItem key={f.id}>
+                              <SidebarMenuSubButton asChild size="sm" isActive={q.id === activePage?.id && f.id === activeSection}
+                                className="h-auto py-1.5 data-[active=true]:bg-brand/10 data-[active=true]:text-brand">
+                                <Link href={href} onClick={(e) => goToSection(e, q.id, f.id)}>
+                                  <span className="line-clamp-2">{f.section}</span>
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          ))}
+                        </SidebarMenuSub>
+                      )}
+                    </SidebarMenuItem>
+                  );
+                })}
                 <SidebarMenuItem>
                   <SidebarMenuButton onClick={() => openPageDialog(project.id)} className="text-muted-foreground">
                     <Plus />เพิ่มเนื้อหา

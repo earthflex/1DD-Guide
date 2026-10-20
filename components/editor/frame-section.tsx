@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  ArrowDown, ArrowUp, Camera, ChevronDown, Columns2, Image as ImageIcon, MapPin, MousePointer2, MoveUpRight, Plus, Square,
-  SquareDashed, Trash2, Undo2, Upload,
+  ArrowDown, ArrowUp, Camera, ChevronDown, Circle, Columns2, Hash, Heading, Image as ImageIcon, MapPin, MousePointer2, MoveUpRight, Plus, Square,
+  SquareDashed, StickyNote, Trash2, Undo2, Upload, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm";
@@ -11,20 +11,32 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FormatButtons, RichTextField } from "@/components/editor/rich-text-field";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  activateFrame, addPin, applyUndo, deleteArrow, deleteHighlight, removeSecondImage, moveStep, removeImage, stepField, useEditor, type Tool,
+  activateFrame, addPin, applyUndo, deleteArrow, deleteHighlight, addNote, removeSecondImage, moveStep, removeImage, setSection, setStepKind, setStepText, useEditor, type Tool,
 } from "@/lib/editor";
-import { isPair, placed, type Frame } from "@/lib/guide-core";
+import { isNote, isPair, placed, stepNumbers, type Frame } from "@/lib/guide-core";
+import { mergeTitle } from "@/lib/rich-text";
+
+/** Image tools with their single-key shortcuts (handled in editor.tsx). */
+const TOOLS = [
+  { value: "select", label: "เลือก", name: "เลือกและย้าย", key: "V", Icon: MousePointer2 },
+  { value: "pin", label: "ปักหมายเลข", name: "ปักหมายเลข", key: "N", Icon: MapPin },
+  { value: "dot", label: "จุด", name: "จุดไม่มีหมายเลข", key: "D", Icon: Circle },
+  { value: "highlight", label: "ไฮไลท์", name: "กรอบไฮไลท์", key: "H", Icon: Square },
+  { value: "arrow", label: "ลูกศร", name: "ลูกศร", key: "A", Icon: MoveUpRight },
+  { value: "redact", label: "ปิดทับ", name: "ปิดทับข้อมูล", key: "R", Icon: SquareDashed },
+] as const;
 import { cn } from "@/lib/utils";
 import { visible } from "@/lib/dom";
 
 const toolHint = (f: Frame, mode: Tool) =>
   mode === "pin"
-    ? f.steps.some((s) => !placed(s)) ? "คลิกบนภาพเพื่อวาง Point ที่เลือก · ข้อความเดิมจะยังอยู่" : "คลิกบนภาพเพื่อเพิ่มหมายเลข · ลากจุดเพื่อย้าย"
+    ? f.steps.some((s) => !placed(s) && !s.kind) ? "คลิกบนภาพเพื่อวาง Point ที่เลือก · ข้อความเดิมจะยังอยู่" : "คลิกบนภาพเพื่อเพิ่มหมายเลข · ลากจุดเพื่อย้าย"
+    : mode === "dot" ? "คลิกบนภาพเพื่อวางจุดที่ไม่มีหมายเลข · ไม่นับในลำดับหมายเลข"
     : mode === "highlight" ? "ลากบนภาพเพื่อสร้างกรอบไฮไลท์สีส้ม"
     : mode === "arrow" ? "ลากจากจุดเริ่มไปยังจุดที่ต้องการชี้ หัวลูกศรอยู่ปลายทาง"
     : mode === "redact" ? "ลากกรอบบนภาพเพื่อปิดทับข้อมูลถาวร"
@@ -34,8 +46,9 @@ const toolHint = (f: Frame, mode: Tool) =>
 export type ImageSource = { upload: (frameId: string, slot?: 1 | 2) => void; capture: (frameId: string, slot?: 1 | 2) => void };
 
 /** One image of a page: toolbar, annotation canvas and its Point list. Ported from editorFrame(). */
-export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
-  frame: Frame; label: string; n: number; total: number; pageTitle: string; source: ImageSource;
+export function FrameSection({ frame: f, label, n, total, base, pageTitle, source }: {
+  /** `base`: Points before this image in its section, so numbers run on across a section's images. */
+  frame: Frame; label: string; n: number; total: number; base: number; pageTitle: string; source: ImageSource;
 }) {
   const active = useEditor((s) => s.activeFrame);
   const isActive = active ? active === f.id : n === 0;
@@ -70,19 +83,38 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
       onFocusCapture={() => activateFrame(f.id)}
       className="scroll-mt-20 outline-none"
     >
-      {total > 1 && (
-        <h2 className="mb-3 text-sm"><b className="font-medium">{label}</b> <span className="text-muted-foreground">· {n + 1} / {total}</span></h2>
-      )}
+      {f.section !== undefined && <SectionHeading frame={f} first={n === 0} />}
+      <div className="mb-3 flex min-h-8 items-center gap-2">
+        {total > 1 && (
+          <h2 className="text-sm"><b className="font-medium">{label}</b> <span className="text-muted-foreground">· {n + 1} / {total}</span></h2>
+        )}
+        {f.section === undefined && (
+          <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground" onClick={() => {
+            setSection(f.id, "");
+            requestAnimationFrame(() => visible(`[data-section-input="${f.id}"]`)?.focus());
+          }}>
+            <Heading />เริ่มหัวข้อย่อยที่ภาพนี้
+          </Button>
+        )}
+      </div>
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <section aria-label={`แก้ไขภาพ ${n + 1}`} className="grid gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1">
               <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={setTool} aria-label="เครื่องมือบนภาพ">
-                <ToggleGroupItem value="select" aria-label="เลือก"><MousePointer2 />เลือก</ToggleGroupItem>
-                <ToggleGroupItem value="pin" disabled={!hasImage} aria-label="ปักหมายเลข"><MapPin />ปักหมายเลข</ToggleGroupItem>
-                <ToggleGroupItem value="highlight" disabled={!hasImage} aria-label="กรอบไฮไลท์"><Square />ไฮไลท์</ToggleGroupItem>
-                <ToggleGroupItem value="arrow" disabled={!hasImage} aria-label="ลูกศร"><MoveUpRight />ลูกศร</ToggleGroupItem>
-                <ToggleGroupItem value="redact" disabled={!hasImage} aria-label="ปิดทับ"><SquareDashed />ปิดทับ</ToggleGroupItem>
+                {TOOLS.map(({ value, label, name, key, Icon }) => (
+                  <Tooltip key={value}>
+                    {/* A wrapper as trigger: the tooltip's own data-state would hide the item's on/off state. */}
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <ToggleGroupItem value={value} disabled={value !== "select" && !hasImage} aria-label={name} aria-keyshortcuts={key}>
+                          <Icon />{label}
+                        </ToggleGroupItem>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{name} (กด {key})</TooltipContent>
+                  </Tooltip>
+                ))}
               </ToggleGroup>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -129,7 +161,7 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
           </div>
           <div className="overflow-hidden rounded-lg border bg-muted/40">
             {hasImage ? (
-              <AnnotationCanvas frame={f} mode={mode} alt={`ภาพประกอบ ${pageTitle}`} />
+              <AnnotationCanvas frame={f} mode={mode} base={base} alt={`ภาพประกอบ ${pageTitle}`} />
             ) : (
               <div className="grid place-items-center gap-3 px-6 py-16 text-center">
                 <ImageIcon className="size-8 text-muted-foreground" />
@@ -152,14 +184,39 @@ export function FrameSection({ frame: f, label, n, total, pageTitle, source }: {
             )}
           </div>
         </section>
-        <Inspector frame={f} n={n} hasImage={hasImage} />
+        <Inspector frame={f} n={n} base={base} hasImage={hasImage} />
       </div>
     </section>
   );
 }
 
-function Inspector({ frame: f, n, hasImage }: { frame: Frame; n: number; hasImage: boolean }) {
+/** Sub-heading that opens a section at this image. Readers see it as a heading with a divider above. */
+function SectionHeading({ frame: f, first }: { frame: Frame; first: boolean }) {
+  return (
+    <div className={cn("mb-4 flex items-center gap-2", !first && "border-t pt-8")}>
+      <Input
+        data-section-input={f.id}
+        value={f.section ?? ""}
+        maxLength={120}
+        onChange={(e) => setSection(f.id, e.target.value)}
+        aria-label="ชื่อหัวข้อย่อย"
+        placeholder="ชื่อหัวข้อย่อย เช่น การแก้ไขแบนเนอร์"
+        className="h-11 border-transparent px-2 text-xl font-medium shadow-none hover:border-input focus-visible:border-ring md:text-xl"
+      />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label="ยกเลิกหัวข้อย่อย" onClick={() => setSection(f.id, null)}><X /></Button>
+        </TooltipTrigger>
+        <TooltipContent>ยกเลิกหัวข้อย่อย ภาพนี้จะรวมกับหัวข้อก่อนหน้า</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+function Inspector({ frame: f, n, base, hasImage }: { frame: Frame; n: number; base: number; hasImage: boolean }) {
   const selected = useEditor((s) => s.selected);
+  const numbers = stepNumbers(f.steps, base);
+  const label = (i: number) => isNote(f.steps[i]) ? "(หมายเหตุ)" : numbers[i] === null ? "(จุดไม่มีหมายเลข)" : String(numbers[i]);
   return (
     <aside aria-label={`คำอธิบายภาพ ${n + 1}`} className="rounded-lg border bg-card">
       <div className="flex items-center justify-between border-b px-4 py-3">
@@ -171,59 +228,66 @@ function Inspector({ frame: f, n, hasImage }: { frame: Frame; n: number; hasImag
           <section
             key={s.id}
             data-step-card={s.id}
-            className={cn("grid gap-2 border-b px-4 py-3 last:border-b-0", s.id === selected && "bg-brand/5")}
+            className={cn("grid gap-2 border-b px-4 py-3 last:border-b-0", isNote(s) && "bg-muted/40", s.id === selected && "bg-brand/5")}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-start gap-2">
+              {isNote(s) ? (
+                <span aria-hidden title="หมายเหตุ ไม่มีจุดบนภาพ" className="mt-1.5 grid size-6 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+                  <StickyNote className="size-3.5" />
+                </span>
+              ) : (
               <button
                 type="button"
-                aria-label={`เลือกจุด ${i + 1}`}
+                aria-label={numbers[i] === null ? "เลือกจุดไม่มีหมายเลข" : `เลือกจุด ${numbers[i]}`}
                 onClick={() => {
                   activateFrame(f.id);
-                  useEditor.setState({ selected: s.id, ...(hasImage && !placed(s) ? { tool: "pin" as Tool } : {}) });
+                  useEditor.setState({ selected: s.id, ...(hasImage && !placed(s) ? { tool: (numbers[i] === null ? "dot" : "pin") as Tool } : {}) });
                 }}
                 className={cn(
-                  "grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-bold",
+                  "mt-1.5 grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-bold",
                   placed(s) ? "bg-brand text-white" : "border border-dashed border-brand text-brand",
                 )}
               >
-                {i + 1}
+                {numbers[i] ?? <span aria-hidden className="size-2 rounded-full bg-current" />}
               </button>
-              <Input
+              )}
+              <RichTextField
                 data-step={s.id}
-                data-step-field="title"
-                maxLength={200}
-                value={s.title}
-                onChange={(e) => stepField(f.id, s.id, "title", e.target.value)}
-                aria-label={`หัวข้อขั้นตอน ${i + 1}`}
-                placeholder={`หัวข้อขั้นตอน ${i + 1}`}
-                className="h-8 border-transparent px-1.5 font-medium shadow-none hover:border-input focus-visible:border-ring"
+                data-step-field="text"
+                value={mergeTitle(s.title, s.text)}
+                onChange={(text) => setStepText(f.id, s.id, text)}
+                label={`คำอธิบายขั้นตอน ${label(i)}`}
+                placeholder={isNote(s) ? "หมายเหตุเพิ่มเติม (ไม่มีจุดบนภาพ)…" : "อธิบายสิ่งที่ลูกค้าต้องทำ…"}
+                className="flex-1 self-start"
               />
             </div>
-            <Textarea
-              data-step={s.id}
-              data-step-field="text"
-              maxLength={10000}
-              value={s.text}
-              onChange={(e) => stepField(f.id, s.id, "text", e.target.value)}
-              aria-label={`คำอธิบายขั้นตอน ${i + 1}`}
-              placeholder="อธิบายสิ่งที่ลูกค้าต้องทำ…"
-              className="min-h-16 text-sm"
-            />
-            <div className="flex items-center justify-between gap-2">
-              {!placed(s) ? (
+            <div className="flex items-center justify-between gap-2 pl-8">
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+              <FormatButtons target={() => visible<HTMLElement>(`[data-step="${s.id}"][data-step-field="text"]`)} />
+              {!placed(s) && !isNote(s) && (
                 <Button variant="ghost" size="sm" disabled={!hasImage}
                   onClick={() => {
                     activateFrame(f.id);
-                    useEditor.setState({ selected: s.id, tool: "pin" });
+                    useEditor.setState({ selected: s.id, tool: numbers[i] === null ? "dot" : "pin" });
                     visible(`#canvas-${f.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
                   }}>
                   <MapPin />{hasImage ? "วางจุดบนภาพ" : "รอเพิ่มภาพ"}
                 </Button>
-              ) : <span />}
+              )}
+              </div>
               <div className="flex gap-0.5">
-                <Button variant="ghost" size="icon-xs" disabled={i === 0} aria-label={`เลื่อนขั้นตอน ${i + 1} ขึ้น`} onClick={() => moveStep(f.id, s.id, "up")}><ArrowUp /></Button>
-                <Button variant="ghost" size="icon-xs" disabled={i === f.steps.length - 1} aria-label={`เลื่อนขั้นตอน ${i + 1} ลง`} onClick={() => moveStep(f.id, s.id, "down")}><ArrowDown /></Button>
-                <Button variant="ghost" size="icon-xs" aria-label={`ลบขั้นตอน ${i + 1}`} className="text-destructive hover:text-destructive" onClick={() => moveStep(f.id, s.id, "delete")}><Trash2 /></Button>
+                {!isNote(s) && <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon-xs" aria-label={numbers[i] === null ? "เปลี่ยนเป็นหมายเลข" : "เปลี่ยนเป็นจุดไม่มีหมายเลข"}
+                      onClick={() => setStepKind(f.id, s.id, numbers[i] !== null)}>
+                      {numbers[i] === null ? <Hash /> : <Circle />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{numbers[i] === null ? "เปลี่ยนเป็นหมายเลข" : "เปลี่ยนเป็นจุดไม่มีหมายเลข"}</TooltipContent>
+                </Tooltip>}
+                <Button variant="ghost" size="icon-xs" disabled={i === 0} aria-label={`เลื่อนขั้นตอน ${label(i)} ขึ้น`} onClick={() => moveStep(f.id, s.id, "up")}><ArrowUp /></Button>
+                <Button variant="ghost" size="icon-xs" disabled={i === f.steps.length - 1} aria-label={`เลื่อนขั้นตอน ${label(i)} ลง`} onClick={() => moveStep(f.id, s.id, "down")}><ArrowDown /></Button>
+                <Button variant="ghost" size="icon-xs" aria-label={`ลบขั้นตอน ${label(i)}`} className="text-destructive hover:text-destructive" onClick={() => moveStep(f.id, s.id, "delete")}><Trash2 /></Button>
               </div>
             </div>
           </section>
@@ -234,12 +298,15 @@ function Inspector({ frame: f, n, hasImage }: { frame: Frame; n: number; hasImag
           </div>
         )}
       </div>
-      <div className="border-t px-3 py-2">
+      <div className="flex flex-wrap gap-1 border-t px-3 py-2">
         <Button variant="ghost" size="sm" disabled={!hasImage} onClick={() => {
           activateFrame(f.id);
           addPin(f.id, 0.5, 0.5);
         }}>
           <Plus />เพิ่มจุดที่กลางภาพ
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => { activateFrame(f.id); addNote(f.id); }}>
+          <StickyNote />เพิ่มหมายเหตุ
         </Button>
       </div>
     </aside>

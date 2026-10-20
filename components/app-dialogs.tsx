@@ -366,7 +366,7 @@ function HelpPanel() {
         งานจะบันทึกลง Workspace ของทีมอัตโนมัติ ตรวจสถานะมุมขวาบนก่อนปิดหน้า<br />
         ไฟล์ HTML ที่ส่งออกไม่มีหน้าจอแก้ไขหรือข้อมูลโปรเจกต์อื่น
       </div>
-      <p className="text-xs text-muted-foreground">ปุ่มลัด: N ปักหมายเลข · A ลูกศร · V เลือก · Esc ยกเลิกเครื่องมือ · Ctrl / Cmd + Z ย้อนกลับ · Ctrl / Cmd + V วางภาพ</p>
+      <p className="text-xs text-muted-foreground">ปุ่มลัด: V เลือก · N ปักหมายเลข · D จุดไม่มีหมายเลข · H ไฮไลท์ · A ลูกศร · R ปิดทับ · Esc ยกเลิกเครื่องมือ · Ctrl / Cmd + Z ย้อนกลับ · Ctrl / Cmd + V วางภาพ · Ctrl / Cmd + B / I ตัวหนา / ตัวเอียงในคำอธิบาย · Ctrl / Cmd + \ ซ่อนแถบด้านข้าง</p>
     </div>
   );
 }

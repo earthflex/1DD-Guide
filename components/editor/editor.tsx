@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/confirm";
 import { FrameSection, type ImageSource } from "@/components/editor/frame-section";
@@ -22,7 +22,7 @@ import {
   appendImages, applyUndo, current, deletePage, duplicatePage, editPage, imageLabel, jumpToFrame, movePage,
   openPage, pairingToken, replaceImage, setImageLabel, setSecondImage, useEditor,
 } from "@/lib/editor";
-import { frames, imageURL, safeURL, type Page } from "@/lib/guide-core";
+import { frames, imageURL, safeURL, stepBase, type Page } from "@/lib/guide-core";
 import { CaptureCancelled, captureScreen, decodeImage, imageFromFile } from "@/lib/images";
 import { useWorkspace } from "@/lib/store";
 import { openDialog, openPreview } from "@/lib/ui";
@@ -50,11 +50,11 @@ export function Editor() {
       if (ev.key === "Escape") useEditor.setState({ tool: "select", selectedBox: "" });
       const t = ev.target as HTMLElement;
       if (t.closest("input,textarea,select,[contenteditable]") || busy() || !current().page) return;
-      const k = ev.key.toLowerCase();
-      if (k === "n" && !ev.ctrlKey && !ev.metaKey) useEditor.setState({ tool: "pin" });
-      if (k === "v" && !ev.ctrlKey && !ev.metaKey) useEditor.setState({ tool: "select" });
-      if (k === "a" && !ev.ctrlKey && !ev.metaKey) useEditor.setState({ tool: "arrow" });
-      if (k === "z" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); applyUndo(); }
+      // By key position (ev.code), so the shortcuts also work with the Thai keyboard layout.
+      const mod = ev.ctrlKey || ev.metaKey;
+      const tool = ({ KeyN: "pin", KeyD: "dot", KeyV: "select", KeyH: "highlight", KeyA: "arrow", KeyR: "redact" } as const)[ev.code as "KeyN"];
+      if (tool && !mod && !ev.altKey && !ev.shiftKey) useEditor.setState({ tool });
+      if (ev.code === "KeyZ" && mod) { ev.preventDefault(); applyUndo(); }
     }
     async function onPaste(ev: ClipboardEvent) {
       const { frame } = current();
@@ -195,7 +195,7 @@ export function Editor() {
 
       <div className="grid gap-12">
         {images.map((f, n) => (
-          <FrameSection key={f.id} frame={f} n={n} total={images.length} label={imageLabel(f, n)} pageTitle={page.title} source={source} />
+          <FrameSection key={f.id} frame={f} n={n} total={images.length} base={stepBase(page, n)} label={imageLabel(f, n)} pageTitle={page.title} source={source} />
         ))}
       </div>
 
@@ -280,7 +280,10 @@ function ImageStrip({ page, onUpload, onCapture }: { page: Page; onUpload: () =>
           const isActive = active ? active === f.id : n === 0;
           const label = imageLabel(f, n);
           return (
-            <div key={f.id} className={cn("flex items-center gap-1.5 rounded-lg border p-1 pr-2", isActive && "border-brand bg-brand/5")}>
+            <Fragment key={f.id}>
+            {/* Sub-heading sections start here: a divider, like the one readers see. */}
+            {n > 0 && f.section !== undefined && <span aria-hidden title={f.section || "หัวข้อย่อย"} className="mx-1 h-9 w-0.5 shrink-0 rounded-full bg-brand/40" />}
+            <div className={cn("flex items-center gap-1.5 rounded-lg border p-1 pr-2", isActive && "border-brand bg-brand/5")}>
               <button
                 type="button"
                 onClick={() => jumpToFrame(f.id)}
@@ -310,6 +313,7 @@ function ImageStrip({ page, onUpload, onCapture }: { page: Page; onUpload: () =>
                 <Pencil aria-hidden className="size-3 text-muted-foreground opacity-50 group-hover/label:opacity-100 group-focus-within/label:opacity-100" />
               </label>
             </div>
+            </Fragment>
           );
         })}
       </div>

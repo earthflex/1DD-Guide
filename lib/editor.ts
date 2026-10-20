@@ -6,7 +6,7 @@
  */
 import { toast } from "sonner";
 import { create } from "zustand";
-import { copy, frame as newFrame, frames, imageURL, isPair, page as newPage, pairLayout, placed, safeURL, uid, type Arrow, type Frame, type Highlight, type Page, type Project, type Step } from "@/lib/guide-core";
+import { copy, frame as newFrame, frames, imageURL, isNote, stepBase, stepNumbers, isPair, page as newPage, pairLayout, placed, safeURL, uid, type Arrow, type Frame, type Highlight, type Page, type Project, type Step } from "@/lib/guide-core";
 import { imageRatio, optimizeImage, redact, slotData } from "@/lib/images";
 import { logActivity, logPageEdit } from "@/lib/activity";
 import { useWorkspace } from "@/lib/store";
@@ -22,7 +22,7 @@ export function pairingToken() {
   return token;
 }
 
-export type Tool = "select" | "pin" | "highlight" | "arrow" | "redact";
+export type Tool = "select" | "pin" | "dot" | "highlight" | "arrow" | "redact";
 type Snapshot = Pick<Frame, "image" | "_imagePath" | "image2" | "_imagePath2" | "steps" | "highlights" | "arrows">;
 
 type EditorState = {
@@ -121,25 +121,56 @@ export function applyUndo() {
 const clampPin = (v: number) => Math.min(0.985, Math.max(0.015, v));
 const hasImage = (f?: Pick<Frame, "image" | "_imagePath">) => !!(f?.image || f?._imagePath);
 
-/** Place the selected/next unplaced step, or add a new one. Returns the step id. */
-export function addPin(frameId: string, x: number, y: number) {
+/**
+ * Place the selected/next unplaced step, or add a new one. Returns the step id.
+ * `dot` adds an unnumbered marker instead (always a new step).
+ */
+export function addPin(frameId: string, x: number, y: number, dot = false) {
   const { page } = current();
   const f = page && findFrame(page, frameId);
   if (!f || !hasImage(f)) return;
   const { selected } = useEditor.getState();
-  const pending = f.steps.find((s) => s.id === selected && !placed(s)) || f.steps.find((s) => !placed(s));
+  // Notes have no marker, so they are never placed.
+  const pending = f.steps.find((s) => s.id === selected && !placed(s) && !isNote(s) && (s.kind === "dot") === dot)
+    || (dot ? undefined : f.steps.find((s) => !placed(s) && !s.kind));
   if (!pending && f.steps.length >= 100) return void toast.error("หนึ่งภาพรองรับได้สูงสุด 100 จุด");
   remember(f);
   const id = pending?.id ?? uid();
   editFrame(frameId, (fr) => {
     const step = fr.steps.find((s) => s.id === id);
     if (step) { step.x = clampPin(x); step.y = clampPin(y); }
-    else fr.steps.push({ id, x: clampPin(x), y: clampPin(y), title: "", text: "" });
+    else fr.steps.push({ id, x: clampPin(x), y: clampPin(y), title: "", text: "", ...(dot ? { kind: "dot" as const } : {}) });
   });
   useEditor.setState({ selected: id });
-  if (pending) toast.success(`วาง Point ${f.steps.indexOf(pending) + 1} แล้ว`);
-  else requestAnimationFrame(() => visible(`[data-step="${id}"][data-step-field="title"]`)?.focus({ preventScroll: true }));
+  if (pending) toast.success(`วาง Point ${stepNumbers(f.steps, stepBase(page!, frames(page!).indexOf(f)))[f.steps.indexOf(pending)] ?? ""} แล้ว`);
+  else requestAnimationFrame(() => visible(`[data-step="${id}"][data-step-field="text"]`)?.focus({ preventScroll: true }));
   return id;
+}
+
+/** Add a note: an extra remark in this image's list with no marker on the image. */
+export function addNote(frameId: string) {
+  const { page } = current();
+  const f = page && findFrame(page, frameId);
+  if (!f) return;
+  if (f.steps.length >= 100) return void toast.error("หนึ่งภาพรองรับได้สูงสุด 100 รายการ");
+  remember(f);
+  const id = uid();
+  editFrame(frameId, (fr) => { fr.steps.push({ id, x: null, y: null, title: "", text: "", kind: "note" }); });
+  useEditor.setState({ selected: id });
+  requestAnimationFrame(() => visible(`[data-step="${id}"][data-step-field="text"]`)?.focus({ preventScroll: true }));
+}
+
+/** Switch a Point between numbered and an unnumbered dot. */
+export function setStepKind(frameId: string, stepId: string, dot: boolean) {
+  const { page } = current();
+  const f = page && findFrame(page, frameId);
+  if (!f) return;
+  remember(f);
+  editFrame(frameId, (fr) => {
+    const s = fr.steps.find((s) => s.id === stepId);
+    if (s && dot) s.kind = "dot";
+    else if (s) delete s.kind;
+  });
 }
 
 export function movePin(frameId: string, stepId: string, to: { x: number; y: number }) {
@@ -200,10 +231,11 @@ export function deleteHighlight(frameId: string, boxId: string) {
   useEditor.setState({ selectedBox: "" });
 }
 
-export function stepField(frameId: string, stepId: string, field: "title" | "text", value: string) {
+/** The one description field (lib/rich-text). An old separate title is folded into it on the first edit. */
+export function setStepText(frameId: string, stepId: string, text: string) {
   editFrame(frameId, (f) => {
     const s = f.steps.find((s) => s.id === stepId);
-    if (s) s[field] = value;
+    if (s) { s.text = text; s.title = ""; }
   });
 }
 
@@ -226,6 +258,14 @@ export function moveStep(frameId: string, stepId: string, action: "up" | "down" 
 /* ---------- images ---------- */
 
 export const imageLabel = (f: Frame, n: number) => f.imageLabel || "ภาพ " + (n + 1);
+
+/** Start a sub-heading section at this image (a string, may be empty while typing) or remove the break (null). */
+export function setSection(frameId: string, value: string | null) {
+  editFrame(frameId, (f) => {
+    if (value === null) delete f.section;
+    else f.section = value.slice(0, 120);
+  });
+}
 
 export function setImageLabel(frameId: string, value: string) {
   editFrame(frameId, (f) => { f.imageLabel = value.trim().slice(0, 80); });
@@ -329,6 +369,9 @@ export async function appendImages(data: string[]) {
 
 export function removeImage(frameId: string) {
   editPage((q) => {
+    // A removed image that opened a section hands its heading to the next image of that section.
+    const all = frames(q), i = all.findIndex((f) => f.id === frameId), next = all[i + 1];
+    if (i >= 0 && next && all[i].section !== undefined && next.section === undefined) next.section = all[i].section;
     if (frameId === q.id) {
       const next = (q.extraImages || []).shift();
       q.image = next?.image || "";
@@ -339,6 +382,7 @@ export function removeImage(frameId: string) {
       q.highlights = next?.highlights || [];
       if (next?.arrows) q.arrows = next.arrows; else delete q.arrows;
       q.imageLabel = next?.imageLabel || "";
+      if (next?.section !== undefined) q.section = next.section; else delete q.section;
     } else q.extraImages = q.extraImages.filter((f) => f.id !== frameId);
   });
   useEditor.setState({ undo: [], activeFrame: "", selected: "" });

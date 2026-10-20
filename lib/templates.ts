@@ -1,5 +1,6 @@
 /* Editable starter content, ported from legacy/templates.js. Creating a template never contacts a customer's website. */
 import { page as newPage, project as newProject, safeURL, uid, type Project } from "@/lib/guide-core";
+import { richEscape } from "@/lib/rich-text";
 
 type TemplatePage = { title: string; path: string; description: string; note: string };
 export type Template = { id: string; name: string; platform: string; description: string; pages: TemplatePage[] };
@@ -50,7 +51,7 @@ export function createFromTemplate(id: string, name: string, website = ''): Proj
   const template = templates.find(t=>t.id===id);
   if (!template) throw new Error('กรุณาเลือกเทมเพลตที่รองรับ');
   const project = newProject(name, safeURL(website), template.description);
-  project.pages = template.pages.map(item => ({...newPage(item.title), description:'', note:item.note, steps:item.description.split('\n').filter(Boolean).map((line: string, n: number)=>({id:uid(),x:null,y:null,title:'ขั้นตอนที่ '+(n+1),text:line.replace(/^\d+\.\s*/, '')})),
+  project.pages = template.pages.map(item => ({...newPage(item.title), description:'', note:item.note, steps:item.description.split("\n").filter(Boolean).map((line: string)=>({id:uid(),x:null,y:null,title:'',text:richEscape(line.replace(/^\d+\.\s*/, ''))})),
     url:id==='shopify'?'https://admin.shopify.com/':adminURL(website,item.path)}));
   return project;
 }

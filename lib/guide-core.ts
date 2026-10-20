@@ -6,7 +6,14 @@
 
 export const VERSION = 2;
 
-export type Step = { id: string; x: number | null; y: number | null; title: string; text: string };
+export type Step = {
+  id: string; x: number | null; y: number | null; title: string; text: string;
+  /**
+   * "dot": a plain marker without a number. "note": an extra remark in the list with no marker on the
+   * image (x and y stay null). Both are skipped when Points are numbered.
+   */
+  kind?: "dot" | "note";
+};
 export type Highlight = { id: string; x: number; y: number; width: number; height: number };
 /** Arrow from (x1,y1) to the head at (x2,y2), in 0–1 image coordinates. */
 export type Arrow = { id: string; x1: number; y1: number; x2: number; y2: number };
@@ -20,6 +27,12 @@ export type Frame = {
   image2?: string;
   _imagePath2?: string;
   imageLabel?: string;
+  /**
+   * Sub-heading that starts a new section at this image; the images after it belong to the section
+   * until the next one. Absent = no break here. Pages with sections number their Points continuously
+   * within each section instead of per image.
+   */
+  section?: string;
   steps: Step[];
   highlights: Highlight[];
   /** Optional: absent in documents written before arrows existed. */
@@ -89,6 +102,29 @@ export const project = (name: string, website = "", description = ""): Project =
 export const frames = (q: Page): Frame[] => [q, ...(q.extraImages || [])];
 export const frame = (): Frame => ({ id: uid(), image: "", steps: [], highlights: [] });
 
+export const numbered = (s: Pick<Step, "kind">) => !s.kind;
+export const isNote = (s: Pick<Step, "kind">) => s.kind === "note";
+export const startsSection = (f: Pick<Frame, "section">) => typeof f.section === "string";
+export const hasSections = (q: Page) => frames(q).some(startsSection);
+
+/** Display number of each Point after `base` numbered ones; null for an unnumbered dot. */
+export function stepNumbers(steps: Pick<Step, "kind">[], base = 0) {
+  let k = base;
+  return steps.map((s) => (numbered(s) ? ++k : null));
+}
+
+/** Numbered Points before image `n` in its section, so its first Point is number base + 1 (0 without sections). */
+export function stepBase(q: Page, n: number) {
+  const all = frames(q);
+  if (!hasSections(q) || startsSection(all[n])) return 0;
+  let base = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    base += all[i].steps.filter(numbered).length;
+    if (startsSection(all[i])) break;
+  }
+  return base;
+}
+
 /** Storage-path checks used when reading the cloud document. */
 export const cloudImagePath = (wid: string) => new RegExp("^" + wid + "/[a-f0-9]{64}\\.(png|jpg|webp)$");
 export const cloudLogoPath = (wid: string) => new RegExp("^" + wid + "/[a-f0-9]{64}\\.png$");
@@ -156,11 +192,13 @@ function clean(raw: any, { cloud }: CleanOptions = {}): Project[] {
           out._imagePath2 = f._imagePath2;
         }
         if (typeof f.imageLabel === "string") out.imageLabel = str(f.imageLabel, 80).trim();
+        if (typeof f.section === "string") out.section = str(f.section, 120).trim();
         out.steps = f.steps.map((s: any) => {
-          if (s && s.x === null && s.y === null) return { id: keepId(s.id), x: null, y: null, title: str(s.title, 200), text: str(s.text) };
+          const kind = s?.kind === "dot" || s?.kind === "note" ? { kind: s.kind as "dot" | "note" } : {};
+          if (s && (s.kind === "note" || (s.x === null && s.y === null))) return { id: keepId(s.id), x: null, y: null, title: str(s.title, 200), text: str(s.text), ...kind };
           if (!s || typeof s.x !== "number" || typeof s.y !== "number" || !Number.isFinite(s.x) || !Number.isFinite(s.y) || s.x < 0 || s.x > 1 || s.y < 0 || s.y > 1)
             throw new Error("ตำแหน่งหมายเลขในไฟล์ไม่ถูกต้อง");
-          return { id: keepId(s.id), x: s.x, y: s.y, title: str(s.title, 200), text: str(s.text) };
+          return { id: keepId(s.id), x: s.x, y: s.y, title: str(s.title, 200), text: str(s.text), ...kind };
         });
         if (f.highlights !== undefined && (!Array.isArray(f.highlights) || f.highlights.length > 100)) throw new Error("ข้อมูลกรอบไฮไลท์ไม่ถูกต้อง");
         out.highlights = (f.highlights || []).map((h: any) => {
@@ -189,6 +227,7 @@ function clean(raw: any, { cloud }: CleanOptions = {}): Project[] {
       np.highlights = first.highlights;
       if (first.arrows) np.arrows = first.arrows;
       if (first.imageLabel !== undefined) np.imageLabel = first.imageLabel;
+      if (first.section !== undefined) np.section = first.section;
       np.extraImages = (q.extraImages || []).map(cleanFrame);
       return np;
     });
